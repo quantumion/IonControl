@@ -17,7 +17,25 @@ from .qtHelper import qtHelper
 project=getProject()
 wavemeterEnabled = project.isEnabled('hardware', 'HighFinesse Wavemeter')
 visaEnabled = project.isEnabled('hardware', 'VISA')
+DG4000Enabled = project.isEnabled('hardware', 'DG4000')
 from PyQt5 import QtCore
+
+if DG4000Enabled:
+    class RG4000WFGenerator(ExternalParameterBase):
+        className = "RG4000 Waveform Generator"
+        def __init__(self, name, config, globalDict, instrument="TCPIP0::192.168.168.21::inst0::INSTR"):
+            ExternalParameterBase.__init__(self, name, config, globalDict)
+            self.rm = visa.ResourceManager()
+            self.instrument = self.rm.open_resource( instrument)
+            self.setDefaults()
+        def TurnOn(self):
+            self.instrument.write(':OUTPut ON')
+            return "ON"
+        def TurnOff(self):
+            self.instrument.write(':OUTPut OFF')
+            return "OFF"
+        def close(self):
+            del self.instrument
 
 if wavemeterEnabled:
     from wavemeter.Wavemeter import Wavemeter

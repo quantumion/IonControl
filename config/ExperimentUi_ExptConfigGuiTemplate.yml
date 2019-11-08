@@ -91,6 +91,8 @@ hardware:
         rootCertificates: path
   VISA:
     description: communication with peripherals (e.g. GPIB, RS232, USB, Ethernet)
+  DG4000 AWG:
+    description: Rigol arbitrary waveform generator
   HighFinesse Wavemeter:
     description: HighFinesse Wavemeter from Toptica photonics for reading laser wavelengths, with Java applet web interface
     fields:
