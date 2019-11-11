@@ -28,8 +28,8 @@ class OrderedList(UserList):
 
 class TreeItem(QtWidgets.QTreeWidgetItem):
     """a custom TreeWidgetItem that keeps track of full paths for loading files"""
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args):
+        super().__init__(args)
         self.path = ''
         self.isdir = True
 
@@ -58,10 +58,11 @@ def checkTree(widget, pathobj, fileChanges=[]):
             if oldpath.exists(): #check if file has already been moved
                 oldpath.rename(newpath)
             widget.child(childind).path = str(newpath)
+            widget.child(childind).setText(0, newpath.name)
         if widget.child(childind).isdir:
             checkTree(widget.child(childind), Path(widget.child(childind).path), fileChanges)
 
-def genFileTree(widget, pathobj, expandAbovePathName=None, onlyIncludeDirsWithPyFiles=False):
+def genFileTree(widget, pathobj, expandAbovePathName=None, onlyIncludeDirsWithPyFiles=False, fullFileList=None, rootdir=None):
     """
     Construct the file tree
     :param widget: Initial object is root TreeWidget
@@ -69,18 +70,22 @@ def genFileTree(widget, pathobj, expandAbovePathName=None, onlyIncludeDirsWithPy
     :param expandAbovePathName: Specifies path of a new file so directories can be expanded to reveal the file
     :return:
     """
-    childrange = range(widget.childCount())
+    if fullFileList is None:
+        fullFileList = dict()
+    if rootdir is None:
+        rootdir = pathobj
     for path in pathobj.iterdir():
-        if str(path) in [widget.child(p).path for p in childrange]: #check if tree item already exists
-            for childind in childrange:
-                if widget.child(childind).path == str(path):
-                    if path.is_dir():
-                        genFileTree(widget.child(childind), path, expandAbovePathName)
+        childpaths = [widget.child(p).path for p in range(widget.childCount())]
+        if str(path) in childpaths:
+            if path.is_dir():
+                childind = childpaths.index(str(path))
+                genFileTree(widget.child(childind), path, expandAbovePathName, fullFileList=fullFileList, rootdir=rootdir)
         else: #otherwise make a new tree item.
-            if path.parts[-1].split('.')[-1] == 'py':
+            if path.suffix == '.py':
                 child = TreeItem()
-                child.setText(0, str(path.parts[-1]))
+                child.setText(0, path.name)
                 child.path = str(path)
+                fullFileList[str(path.relative_to(rootdir))] = path
                 child.isdir = False
                 child.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsDragEnabled | QtCore.Qt.ItemIsSelectable)
                 child.setIcon(0,QtGui.QIcon( ":/openicon/icons/edit-shred.png"))
@@ -89,12 +94,12 @@ def genFileTree(widget, pathobj, expandAbovePathName=None, onlyIncludeDirsWithPy
                     expandAboveChild(widget)
             elif path.is_dir() and not path.match('*/__*__*') and (not onlyIncludeDirsWithPyFiles or len(list(path.glob('**/*.py')))):
                 child = TreeItem()
-                child.setText(0, str(path.parts[-1]))
+                child.setText(0, path.name)
                 child.path = str(path)
                 child.setFlags(QtCore.Qt.ItemIsDropEnabled | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsDragEnabled | QtCore.Qt.ItemIsSelectable)
                 child.setIcon(0,QtGui.QIcon( ":/openicon/icons/document-open-5.png"))
                 widget.addChild(child)
-                genFileTree(child, path, expandAbovePathName)
+                genFileTree(child, path, expandAbovePathName, fullFileList=fullFileList, rootdir=rootdir)
     widget.sortChildren(0, 0)
 
 def expandAboveChild(child):
@@ -122,6 +127,19 @@ def recurseExpand(node, expand=True):
     for childind in range(node.childCount()):
         node.child(childind).setExpanded(expand)
         recurseExpand(node.child(childind), expand)
+
+def sequenceFile(filename:Path):
+    if filename.exists():
+        import re
+        n = re.compile('\(\d+\)')
+        m = n.search(filename.name)
+        if m:
+            newname = re.sub('\(\d+\)','({0})'.format(int(m.group()[1:-1])+1),filename.stem)
+        else:
+            newname = filename.stem+'(1)'
+        newname += '.py'
+        return sequenceFile(filename.with_name(newname))
+    return filename
 
 class OptionsWindow(OptionsWidget, OptionsBase):
     OptionsChangedSignal = QtCore.pyqtSignal()
@@ -194,6 +212,7 @@ class FileTreeMixin:
         self.fileTreeWidget.setSortingEnabled(True)
         self.fileTreeWidget.sortItems(0, QtCore.Qt.AscendingOrder)
         self.fileTreeWidget.setHeaderLabels(['User Function Files'])
+        self.allFiles = dict()
         self.populateTree()
 
         self.expandTree = QtWidgets.QAction("Expand All", self)
@@ -266,16 +285,16 @@ class FileTreeMixin:
             newpath = Path(item.path).parent.joinpath(item.text(0))
             Path(item.path).rename(newpath)
             item.path = str(newpath)
-            item.setText(0, str(newpath.parts[-1]))
+            item.setText(0, newpath.stem)
             changedFiles = []
             checkTree(self.fileTreeWidget.invisibleRootItem(), Path(self.defaultDir), changedFiles)
             self.updatePathChanges(changedFiles)
         elif item.text(0) != Path(item.path).name:
             oldpath = Path(item.path)
-            newpath = Path(item.path).with_name(item.text(0)).with_suffix('.py')
+            newpath = sequenceFile(Path(item.path).with_name(item.text(0)).with_suffix('.py'))
             Path(item.path).rename(newpath)
             item.path = str(newpath)
-            item.setText(0, str(newpath.parts[-1]))
+            item.setText(0, newpath.name)
             self.updatePathChanges([(oldpath, newpath)])
 
     def rightClickMenu(self, pos):
@@ -290,7 +309,7 @@ class FileTreeMixin:
         self.collapseTree.triggered.connect(lambda: onExpandOrCollapse(self.fileTreeWidget, True, False))
         self.expandChild.triggered.connect(lambda: onExpandOrCollapse(self.fileTreeWidget, False, True))
         self.collapseChild.triggered.connect(lambda: onExpandOrCollapse(self.fileTreeWidget, False, False))
-        if items[0].isdir == False:
+        if not items or items[0].isdir == False:
             menu.addAction(self.expandTree)
             menu.addAction(self.collapseTree)
         else:
@@ -302,7 +321,7 @@ class FileTreeMixin:
 
     def populateTree(self, newfilepath=None):
         """constructs the file tree viewer"""
-        genFileTree(self.fileTreeWidget.invisibleRootItem(), Path(self.defaultDir), newfilepath)
+        genFileTree(self.fileTreeWidget.invisibleRootItem(), Path(self.defaultDir), newfilepath, fullFileList=self.allFiles)
 
     def onDrop(self, event):
         """an extension of dropEvent call that applies path changes to the system"""
@@ -313,7 +332,7 @@ class FileTreeMixin:
         self.updatePathChanges(changedFiles)
         for oldName, newName in changedFiles:
             if oldName == self.script.fullname:
-                self.script.fullname = newName
+                self.script.fullname = sequenceFile(newName)
 
     def updatePathChanges(self, changedFiles):
         """updates path information in file tree, combo box, recentFiles,
@@ -333,6 +352,30 @@ class FileTreeMixin:
         """pop up window to confirm loss of unsaved changes when loading new file"""
         reply = QtWidgets.QMessageBox.question(self, 'Message',
                                                "Are you sure you want to discard changes?", QtWidgets.QMessageBox.Yes |
+                                               QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.Yes:
+            return True
+        return False
+
+    def onLoad(self):
+        """The load button is clicked. Open file prompt for file."""
+        fullname, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Script', str(self.defaultDir), 'Python scripts (*.py *.pyw)')
+        fullPath = Path(fullname)
+        if fullname!="":
+            if self.defaultDir not in fullPath.parents:
+                if self.copyToDir(self.defaultDir.stem):
+                    newpath = sequenceFile(self.defaultDir.joinpath(fullPath.name))
+                    newpath.write_bytes(fullPath.read_bytes())
+                    fullPath = newpath
+                    self.populateTree(fullPath)
+                    self.loadFile(fullPath)
+            else:
+                self.loadFile(fullPath)
+
+    def copyToDir(self, dirname):
+        """when loading a file from outside Scripting directory"""
+        reply = QtWidgets.QMessageBox.question(self, 'Message',
+                                               "Files must be in {} directory, make a local copy?".format(dirname), QtWidgets.QMessageBox.Yes |
                                                QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
         if reply == QtWidgets.QMessageBox.Yes:
             return True

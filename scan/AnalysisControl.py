@@ -7,6 +7,8 @@
 import PyQt5.uic
 import logging
 
+import numpy
+
 from modules.AttributeComparisonEquality import AttributeComparisonEquality
 from modules.SequenceDict import SequenceDict
 from scan.AnalysisTableModel import AnalysisTableModel             #@UnresolvedImport
@@ -24,6 +26,8 @@ from fit.FitResultsTableModel import FitResultsTableModel
 from fit.FitFunctionBase import fitFunctionMap
 from fit.StoredFitFunction import StoredFitFunction                #@UnresolvedImport
 from modules.PyqtUtility import BlockSignals, Override, updateComboBoxItems
+from itertools import cycle
+from modules.flatten import flattenAll
 
 import os
 uipath = os.path.join(os.path.dirname(__file__), '..', 'ui/AnalysisControl.ui')
@@ -85,7 +89,9 @@ class AnalysisControl(ControlForm, ControlBase ):
         self.evaluationNames = evaluationNames
         # History and Dictionary
         try:
-            self.analysisDefinitionDict = self.config.get(self.configname+'.dict', dict())
+            self.analysisDefinitionDict = dict(self.config.items_startswith(self.configname + '.dict.'))
+            if not self.analysisDefinitionDict:
+                self.analysisDefinitionDict = self.config.get(self.configname+'.dict', dict())
         except TypeError:
             logging.getLogger(__name__).info( "Unable to read analysis control settings dictionary. Setting to empty dictionary." )
             self.analysisDefinitionDict = dict()
@@ -171,6 +177,19 @@ class AnalysisControl(ControlForm, ControlBase ):
         self.addAction( self.autoSaveAction )
         self.autoSave()
         self.currentAnalysisChanged.emit( self.currentAnalysisName )
+
+        # setup actions for copying fit results/parameters from their respective tables
+        self.parameterTableView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.parameterTableView.customContextMenuRequested.connect(self.parameterRightClickMenu)
+        self.resultsTableView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.resultsTableView.customContextMenuRequested.connect(self.resultsRightClickMenu)
+        self.copyResultsAction = QtWidgets.QAction("copy to clipboard", self)
+        self.copyResultsAction.triggered.connect(lambda: self.copyToClipboard(self.resultsTableView, self.fitResultsTableModel))
+        self.copyParameterAction = QtWidgets.QAction("copy to clipboard", self)
+        self.copyParameterAction.triggered.connect(lambda: self.copyToClipboard(self.parameterTableView, self.fitfunctionTableModel))
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtGui.QKeySequence.Copy), self.parameterTableView, lambda: self.copyToClipboard(self.parameterTableView, self.fitfunctionTableModel), context=QtCore.Qt.WidgetWithChildrenShortcut)
+        QtWidgets.QShortcut(QtGui.QKeySequence(QtGui.QKeySequence.Copy), self.resultsTableView, lambda: self.copyToClipboard(self.resultsTableView, self.fitResultsTableModel), context=QtCore.Qt.WidgetWithChildrenShortcut)
+
 
     def onUseErrorBars(self, state):
         if self.fitfunction is not None:
@@ -294,7 +313,7 @@ class AnalysisControl(ControlForm, ControlBase ):
         return self.currentAnalysisName != '' and ( self.currentAnalysisName not in self.analysisDefinitionDict or not (self.analysisDefinitionDict[self.currentAnalysisName] == self.analysisDefinition))            
                 
     def saveConfig(self):
-        self.config[self.configname+'.dict'] = self.analysisDefinitionDict
+        self.config.set_string_dict(self.configname + '.dict', self.analysisDefinitionDict)
         self.config[self.configname] = self.analysisDefinition
         self.config[self.configname+'.settingsName'] = self.currentAnalysisName
         self.config[self.configname+'.guiState'] = saveGuiState( self )
@@ -362,8 +381,8 @@ class AnalysisControl(ControlForm, ControlBase ):
                 if plot.hasHeightColumn:
                     sigma = plot.height
                 elif plot.hasTopColumn and plot.hasBottomColumn:
-                    sigma = abs(plot.top + plot.bottom)
-                self.fitfunction.leastsq(plot.x, plot.y, sigma=sigma)
+                    sigma = abs(numpy.array(plot.top) + numpy.array(plot.bottom))
+                self.fitfunction.leastsq(plot.x, plot.y, sigma=sigma, filt=plot.filt)
                 plot.fitFunction = copy.deepcopy(self.fitfunction)
                 plot.plot(-2)
                 evaluation.fitfunction = StoredFitFunction.fromFitfunction(self.fitfunction)
@@ -382,8 +401,8 @@ class AnalysisControl(ControlForm, ControlBase ):
                 if plot.hasHeightColumn:
                     sigma = plot.height
                 elif plot.hasTopColumn and plot.hasBottomColumn:
-                    sigma = abs(plot.top + plot.bottom)
-                fitfunction.leastsq(plot.x, plot.y, sigma=sigma)
+                    sigma = abs(numpy.array(plot.top) + numpy.array(plot.bottom))
+                fitfunction.leastsq(plot.x, plot.y, sigma=sigma, filt=plot.filt)
                 plot.fitFunction = fitfunction
                 plot.plot(-2)
                 evaluation.fitfunction = StoredFitFunction.fromFitfunction(fitfunction)
@@ -408,7 +427,7 @@ class AnalysisControl(ControlForm, ControlBase ):
         if self.currentEvaluation is not None:
             plot = self.plottedTraceDict.get( self.currentEvaluation.evaluation )
             fitfunction = copy.deepcopy(self.fitfunction)
-            fitfunction.parameters = [float(param) for param in fitfunction.startParameters]
+            fitfunction.parameters = [float(param) if unit is None else param.m_as(unit) for unit, param in zip(cycle(flattenAll([fitfunction.units])), fitfunction.startParameters)]
             plot.fitFunction = fitfunction
             plot.plot(-2)
             fitfunction.update()
@@ -482,7 +501,43 @@ class AnalysisControl(ControlForm, ControlBase ):
         if self.fitfunction is not None:
             self.fitfunction.startParameters = copy.deepcopy(self.fitfunction.parameters)
             self.fitfunctionTableModel.startDataChanged()
-    
+
+    def copyToClipboard(self, tableview, model):
+        """ Copy value to clipboard as a string. """
+        clip = QtWidgets.QApplication.clipboard()
+        indices = tableview.selectedIndexes()
+        role = QtCore.Qt.DisplayRole
+        if len(indices) == 1: # just copy the text in the selected box
+            clip.setText(str(model.data(indices[0], role)))
+        else: # copy contents of selected boxes into a table (nested lists)
+            # the following code sorts indices by row (then column) and constructs nested lists to be copied
+            sortedIndices = sorted(indices, key=lambda ind: ind.row()*100+ind.column())
+            finalDataList = []
+            innerDataList = []
+            initRow = sortedIndices[0].row()
+            for ind in sortedIndices:
+                if ind.row() != initRow:
+                    finalDataList.append(innerDataList)
+                    innerDataList = []
+                    initRow = ind.row()
+                innerDataList.append(model.data(ind, role))
+            finalDataList.append(innerDataList)
+            clip.setText(str(finalDataList))
+
+    def parameterRightClickMenu(self, pos):
+        """a CustomContextMenu for copying parameters from fit parameter table"""
+        menu = QtWidgets.QMenu()
+        menu.addAction(self.autoSaveAction)
+        menu.addAction(self.copyParameterAction)
+        menu.exec_(self.parameterTableView.mapToGlobal(pos))
+
+    def resultsRightClickMenu(self, pos):
+        """a CustomContextMenu for copying parameters from fit results table"""
+        menu = QtWidgets.QMenu()
+        menu.addAction(self.autoSaveAction)
+        menu.addAction(self.copyResultsAction)
+        menu.exec_(self.resultsTableView.mapToGlobal(pos))
+
 if __name__=="__main__":
     import sys
     config = dict()

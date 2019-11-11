@@ -4,7 +4,7 @@
 # in the file "license.txt" in the top-level IonControl directory
 # *****************************************************************
 
-from itertools import zip_longest
+from itertools import zip_longest, cycle
 import logging
 from math import sqrt
 
@@ -12,11 +12,13 @@ import numpy
 from scipy.optimize import leastsq
 
 from modules.SequenceDict import SequenceDict
-import xml.etree.ElementTree as ElementTree
+import lxml.etree as ElementTree
 from modules.Expression import Expression
 from modules.Observable import Observable
 from modules.quantity import Q
 from leastsqbound import leastsqbound
+from modules.DataChanged import DataChanged
+import collections
 
 
 class FitFunctionException(Exception):
@@ -38,16 +40,36 @@ class ResultRecord(object):
 
     def __hash__(self):
         return hash(tuple(getattr(self, field) for field in self.stateFields))
-    
-fitFunctionMap = dict()    
-   
+
+fitFunUpdate = DataChanged()
+
+class UniqueOriginDict(collections.UserDict):
+    """A custom dictionary for proper updating of user-defined fit functions"""
+    def __init__(self):
+        super().__init__()
+        self.origins = dict()
+
+    def __setitem__(self, key, item):
+        if 'origin' in vars(item).keys():
+            if item.__dict__['origin'] in self.origins.keys():
+                repname = self.origins[item.__dict__['origin']]
+                del self.origins[item.__dict__['origin']]
+                del self.data[repname]
+                fitFunUpdate.dataChanged.emit(repname, False)
+            self.origins[item.__dict__['origin']] = key
+        self.data[key] = item
+
+fitFunctionMap = UniqueOriginDict()
+
 class FitFunctionMeta(type):
     def __new__(self, name, bases, dct):
         if 'name' not in dct:
             raise FitFunctionException("Fitfunction class needs to have class attribute 'name'")
         instrclass = super(FitFunctionMeta, self).__new__(self, name, bases, dct)
         if name!='FitFunctionBase':
-            fitFunctionMap[dct['name']] = instrclass
+            fitFunctionMap[str(dct['name'])] = instrclass
+            overwriteParams = dct.get('overwrite', False)
+            fitFunUpdate.dataChanged.emit(str(dct['name']), overwriteParams)
         return instrclass
     
 def native(method):
@@ -97,12 +119,12 @@ class FitFunctionBase(object, metaclass=FitFunctionMeta):
         """return a list where the disabled parameters are added to the enabled parameters given in p"""
         pindex = 0
         params = list()
-        for index, enabled in enumerate(self.parameterEnabled):
+        for index, (unit, enabled) in enumerate(zip(cycle(self.units if isinstance(self.units, list) else [self.units]), self.parameterEnabled)):
             if enabled:
                 params.append(p[pindex])
                 pindex += 1
             else:
-                params.append(float(self.startParameters[index]))
+                params.append(float(self.startParameters[index]) if unit is None else self.startParameters[index].m_as(unit))
         return params
     
     @staticmethod
@@ -123,9 +145,9 @@ class FitFunctionBase(object, metaclass=FitFunctionMeta):
                 if enabled:
                     params.append(self.coercedValue(float(param), bounds))
         else:
-            for enabled, param in zip(self.parameterEnabled, parameters):
+            for enabled, unit, param in zip(self.parameterEnabled, cycle(self.units if isinstance(self.units, list) else [self.units]), parameters):
                 if enabled:
-                    params.append(float(param))
+                    params.append(float(param) if unit is None else param.m_as(unit))
         return params
 
     def enabledFitParameters(self, parameters=None):
@@ -149,12 +171,12 @@ class FitFunctionBase(object, metaclass=FitFunctionMeta):
     def setEnabledFitParameters(self, parameters):
         """set the fitted parameters if enabled"""
         pindex = 0
-        for index, enabled in enumerate(self.parameterEnabled):
+        for index, (unit, enabled) in enumerate(zip(cycle(self.units if isinstance(self.units, list) else [self.units]), self.parameterEnabled)):
             if enabled:
                 self.parameters[index] = parameters[pindex]
                 pindex += 1
             else:
-                self.parameters[index] = float(self.startParameters[index])
+                self.parameters[index] = float(self.startParameters[index]) if unit is None else self.startParameters[index].m_as(unit)
     
     def setEnabledConfidenceParameters(self, confidence):
         """set the parameter confidence values for the enabled parameters"""
@@ -191,7 +213,13 @@ class FitFunctionBase(object, metaclass=FitFunctionMeta):
         enabled = any( (any(bounds) for bounds in result) )
         return result if enabled else None
 
-    def leastsq(self, x, y, parameters=None, sigma=None):
+    def leastsq(self, xin, yin, parameters=None, sigma=None, filt=None):
+        if filt is None:
+            x, y = map(numpy.asarray, zip(*filter(lambda x: ~numpy.isnan(x[0]) and ~numpy.isnan(x[1]), zip(xin,yin))))
+        elif sigma is None:
+            x, y, _ = map(numpy.asarray, zip(*filter(lambda x: ~numpy.isnan(x[0]) and ~numpy.isnan(x[1]) and x[2], zip(xin,yin,filt))))
+        else:
+            x, y, _, sigma = map(numpy.asarray, zip(*filter(lambda x: ~numpy.isnan(x[0]) and ~numpy.isnan(x[1]) and x[2], zip(xin,yin,filt,sigma))))
         logger = logging.getLogger(__name__)
         # Ensure all values of sigma or non zero by replacing with the minimum nonzero value
         if sigma is not None and self.useErrorBars:
@@ -200,7 +228,7 @@ class FitFunctionBase(object, metaclass=FitFunctionMeta):
         else:
             sigma = None 
         if parameters is None:
-            parameters = [float(param) for param in self.startParameters]
+            parameters = [float(param) if unit is None else param.m_as(unit) for unit, param in zip(cycle(self.units if isinstance(self.units, list) else [self.units]), self.startParameters)]
         if self.useSmartStartValues:
             smartParameters = self.smartStartValues(x, y, parameters, self.parameterEnabled)
             if smartParameters is not None:

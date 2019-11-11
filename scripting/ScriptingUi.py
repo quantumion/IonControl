@@ -28,6 +28,7 @@ ScriptingWidget, ScriptingBase = PyQt5.uic.loadUiType(uipath)
 
 class ScriptingUi(FileTreeMixin, ScriptingWidget, ScriptingBase):
     """Ui for the scripting interface."""
+    scriptFinishedSignal = QtCore.pyqtSignal()
     def __init__(self, experimentUi):
         ScriptingWidget.__init__(self)
         ScriptingBase.__init__(self)
@@ -47,6 +48,7 @@ class ScriptingUi(FileTreeMixin, ScriptingWidget, ScriptingBase):
     def setupUi(self, parent):
         super(ScriptingUi, self).setupUi(parent)
         self.configname = 'Scripting'
+
 
         #initialize default options
         self.optionsWindow = OptionsWindow(self.config, 'ScriptingEditorOptions')
@@ -120,6 +122,13 @@ class ScriptingUi(FileTreeMixin, ScriptingWidget, ScriptingBase):
         self.setWindowTitle(self.configname)
         self.setWindowIcon(QtGui.QIcon(":/other/icons/Terminal-icon.png"))
         self.statusLabel.setText("Idle")
+        windowState = self.config.get(self.configname+".guiState")
+        if windowState:
+            self.restoreState(windowState)
+        self.setCorner(QtCore.Qt.BottomRightCorner,QtCore.Qt.RightDockWidgetArea)
+        self.setCorner(QtCore.Qt.TopRightCorner,QtCore.Qt.RightDockWidgetArea)
+        self.setCorner(QtCore.Qt.TopLeftCorner,QtCore.Qt.LeftDockWidgetArea)
+        self.setCorner(QtCore.Qt.BottomLeftCorner,QtCore.Qt.LeftDockWidgetArea)
 
     def onOpenOptions(self):
         self.optionsWindow.show()
@@ -202,7 +211,8 @@ class ScriptingUi(FileTreeMixin, ScriptingWidget, ScriptingBase):
         self.enableScriptChange(True)
         if self.revert and self.savedState:
             self.restoreSettingsState()
-            
+        self.scriptFinishedSignal.emit() #used for running scans from todo list
+
     @QtCore.pyqtSlot()
     def onRepeat(self):
         """Repeat button is clicked."""
@@ -237,19 +247,23 @@ class ScriptingUi(FileTreeMixin, ScriptingWidget, ScriptingBase):
         if ok:
             shortname = str(shortname)
             shortname = shortname.replace(' ', '_') #Replace spaces with underscores
-            shortname = shortname.split('.')[0] + '.py'#Take only what's before the '.'
-            fullname = self.defaultDir.joinpath(shortname)
-            ensurePath(fullname.parent)
-            if not fullname.exists():
-                try:
-                    with fullname.open('w') as f:
-                        newFileText = '#' + shortname + ' created ' + str(datetime.now()) + '\n\n'
-                        f.write(newFileText)
-                except Exception as e:
-                    message = "Unable to create new file {0}: {1}".format(shortname, e)
-                    logger.error(message)
-                    return
-            self.loadFile(fullname)
+            if shortname[-1] == '/':
+                fullname = self.defaultDir.joinpath(shortname)
+                ensurePath(fullname)
+            else:
+                shortname = shortname.split('.')[0] + '.py'#Take only what's before the '.'
+                fullname = self.defaultDir.joinpath(shortname)
+                ensurePath(fullname.parent)
+                if not fullname.exists():
+                    try:
+                        with fullname.open('w') as f:
+                            newFileText = '#' + shortname + ' created ' + str(datetime.now()) + '\n\n'
+                            f.write(newFileText)
+                    except Exception as e:
+                        message = "Unable to create new file {0}: {1}".format(shortname, e)
+                        logger.error(message)
+                        return
+                self.loadFile(fullname)
             self.populateTree(fullname)
 
     def enableScriptChange(self, enabled):
@@ -283,8 +297,9 @@ class ScriptingUi(FileTreeMixin, ScriptingWidget, ScriptingBase):
 
     def onLoad(self):
         """The load button is clicked. Open file prompt for file."""
-        fullname, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Script', self.defaultDir, 'Python scripts (*.py *.pyw)')
-        if fullname!="":
+        fullname, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Script', str(self.defaultDir), 'Python scripts (*.py *.pyw)')
+        if fullname != "":
+            fullname = Path(fullname)
             self.loadFile(fullname)
 
     def loadFile(self, fullname):
@@ -338,26 +353,10 @@ class ScriptingUi(FileTreeMixin, ScriptingWidget, ScriptingBase):
         self.config[self.configname+'.slow'] = self.script.slow
         self.config[self.configname+'.repeat'] = self.script.repeat
         self.config[self.configname+'.isVisible'] = self.isVisible()
-        self.config[self.configname+'.ScriptingUi.pos'] = self.pos()
-        self.config[self.configname+'.ScriptingUi.size'] = self.size()
-        self.config[self.configname+".splitterHorizontal"] = self.splitterHorizontal.saveState()
-        self.config[self.configname+".splitterVertical"] = self.splitterVertical.saveState()
         self.config[self.configname+'.consoleMaximumLinesNew'] = self.consoleMaximumLines
-        self.config[self.configname+'.consoleEnable'] = self.consoleEnable
-       
+        self.config[self.configname+'.guiState'] = self.saveState()
+
     def show(self):
-        pos = self.config.get(self.configname+'.ScriptingUi.pos')
-        size = self.config.get(self.configname+'.ScriptingUi.size')
-        splitterHorizontalState = self.config.get(self.configname+".splitterHorizontal")
-        splitterVerticalState = self.config.get(self.configname+".splitterVertical")
-        if pos:
-            self.move(pos)
-        if size:
-            self.resize(size)
-        if splitterHorizontalState:
-            self.splitterHorizontal.restoreState(splitterHorizontalState)
-        if splitterVerticalState:
-            self.splitterVertical.restoreState(splitterVerticalState)
         QtWidgets.QDialog.show(self)
 
     def onClose(self):

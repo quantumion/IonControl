@@ -3,14 +3,14 @@
 # This Software is released under the GPL license detailed
 # in the file "license.txt" in the top-level IonControl directory
 # *****************************************************************
-import visa   #@UnresolvedImport
+import visa  #@UnresolvedImport
 
 class Settings:
     pass
 
 class Keithley2010Reader(object):
     _outputChannels = {}
-    modeNames = ['Voltage:DC', 'Voltage:AC', 'Current:DC', 'Current:AC', 'Resistance']
+    modeNames = ['Voltage:DC', 'Voltage:AC', 'Current:DC', 'Current:AC', 'Resistance', 'FResistance']
     @staticmethod
     def connectedInstruments():
         rm = visa.ResourceManager()
@@ -27,6 +27,7 @@ class Keithley2010Reader(object):
         self.settings.__dict__.setdefault('digits', 8)
         self.settings.__dict__.setdefault('averagePoints', 100 )
         self.settings.__dict__.setdefault('channelSettings',  dict())
+        self.settings.__dict__.setdefault('mode', 'Voltage:DC')
 
     def open(self):
         self.rm = visa.ResourceManager()

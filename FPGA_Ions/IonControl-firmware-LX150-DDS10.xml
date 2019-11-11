@@ -8,8 +8,8 @@
         <Parameter address="0x22" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 0" shift="0" name="Ch 0 delay Coefficient" encoding="TIME" enabled="True"/>
         <Parameter address="0x23" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 0" shift="0" name="Ch 0 offset Coefficient" encoding="ADC7606_VOLTAGE" enabled="True"/>
 
-        <Parameter address="0x24" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 1" shift="0" name="Ch 1 p Coefficient" encoding="None" enabled="True"/>
-        <Parameter address="0x25" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 1" shift="0" name="Ch 1 i Coefficient" encoding="None" enabled="True"/>
+        <Parameter address="0x24" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 1" shift="0" name="Ch 1 p Coefficient" encoding="signed32" enabled="True"/>
+        <Parameter address="0x25" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 1" shift="0" name="Ch 1 i Coefficient" encoding="signed32" enabled="True"/>
         <Parameter address="0x26" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 1" shift="0" name="Ch 1 delay Coefficient" encoding="TIME" enabled="True"/>
         <Parameter address="0x27" default="0" bitmask="0xffffffffffffffff" categories="PI Loop Parameters, Channel 1" shift="0" name="Ch 1 offset Coefficient" encoding="ADC7606_VOLTAGE" enabled="True"/>
 
@@ -249,15 +249,15 @@
         <TriggerBit bitNo="8" name="DDS update 8"/>
         <TriggerBit bitNo="9" name="DDS update 9"/>
 
-        <TriggerBit bitNo="16" name="PI 0 reset"/>
-        <TriggerBit bitNo="17" name="PI 1 reset"/>
-        <TriggerBit bitNo="18" name="PI 2 reset"/>
-        <TriggerBit bitNo="19" name="PI 3 reset"/>
-        <TriggerBit bitNo="20" name="PI 4 reset"/>
-        <TriggerBit bitNo="21" name="PI 5 reset"/>
-        <TriggerBit bitNo="22" name="PI 6 reset"/>
-        <TriggerBit bitNo="23" name="PI 7 reset"/>
-        <TriggerBit bitNo="24" name="DAC update"/>
+        <TriggerBit bitNo="24" name="PI 0 reset"/>
+        <TriggerBit bitNo="25" name="PI 1 reset"/>
+        <TriggerBit bitNo="26" name="PI 2 reset"/>
+        <TriggerBit bitNo="27" name="PI 3 reset"/>
+        <TriggerBit bitNo="28" name="PI 4 reset"/>
+        <TriggerBit bitNo="29" name="PI 5 reset"/>
+        <TriggerBit bitNo="30" name="PI 6 reset"/>
+        <TriggerBit bitNo="31" name="PI 7 reset"/>
+        <TriggerBit bitNo="16" name="DAC update"/>
     </TriggerBits>
     <DDSChannels>
         <DDSChannel channel="0" chip="AD9912" shutter="24"/>

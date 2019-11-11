@@ -54,6 +54,9 @@ class EncodingsTest(unittest.TestCase):
         self.assertEqual(encode(Q(500, 'MHz'), 'AD9912_FRQ'), 0x800000000000)
         self.assertEqual(encode(Q(500, 'MHz'), 'AD9912_FRQ'), legacy_encode(Q(500, 'MHz'), 'AD9912_FRQ'))
 
+    def testDDSSigned(self):
+        print('Negative', hex(encode(Q(-1, 'mHz'), 'AD9912_FRQ_SIGN')))
+
     def testTime(self):
         self.assertEqual(encode(Q(100, 'ns')), 20)
         self.assertEqual(encode(Q(100, 'us')), 20000)
@@ -108,6 +111,10 @@ class EncodingsTest(unittest.TestCase):
 
     def testNoneEncoding(self):
         self.assertEqual(encode(Q(-5, 'MHz')), 18446744073709551611)
+
+    def testPhase(self):
+        self.assertEqual(encode(Q(0), 'AD9912_PHASE'), 0)
+        self.assertEqual(encode(Q(360), 'AD9912_PHASE'), 0)
 
 if __name__ == "__main__":
     unittest.main()

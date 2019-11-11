@@ -1,5 +1,8 @@
 <RCC>
   <qresource prefix="kde">
+    <file>icons/grafanalogo.png</file>
+    <file>icons/profiling-off.png</file>
+    <file>icons/profiling-on.png</file>
     <file>icons/ImportXMLFile-48.png</file>
     <file>icons/ExportToXMLFile-48.png</file>
     <file>icons/view-filter.png</file>

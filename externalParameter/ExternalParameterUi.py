@@ -39,7 +39,7 @@ class ExternalParameterControlModel(CategoryTreeModel):
             (QtCore.Qt.DisplayRole, 1): lambda node: str(node.content.targetValue),
             (QtCore.Qt.EditRole, 1): lambda node: firstNotNone( node.content.string, str(node.content.targetValue) ),
             (QtCore.Qt.UserRole, 1): lambda node: node.content.dimension,
-            (QtCore.Qt.DisplayRole, 2): lambda node: str(node.content.value),
+            (QtCore.Qt.DisplayRole, 2): lambda node: str(node.content.externalValue),
             (QtCore.Qt.BackgroundRole, 1): self.dependencyBgFunction,
             (QtCore.Qt.ToolTipRole, 1): self.toolTipFunction
             })
@@ -99,8 +99,7 @@ class ExternalParameterControlModel(CategoryTreeModel):
     def _setValue(self, inst, value):
         logger = logging.getLogger(__name__)
         logger.debug( "setValue {0}".format(value))
-        inst.targetValue = value
-        self.setValueFollowup(inst)
+        self.setValueFollowup(inst, value)
         return True
  
     def setStrValue(self, index, strValue):
@@ -108,16 +107,17 @@ class ExternalParameterControlModel(CategoryTreeModel):
         node.content.string = strValue
         return True
         
-    def setValueFollowup(self, inst):
+    def setValueFollowup(self, inst, targetValue=None):
         try:
+            value = targetValue or inst.targetValue
             logger = logging.getLogger(__name__)
-            logger.debug( "setValueFollowup {0}".format( inst.value ) )
-            if not inst.setValue(inst.targetValue):
-                delay = int( inst.settings.delay.m_as('ms') )
-                QtCore.QTimer.singleShot(delay, functools.partial(self.setValueFollowup, inst))
+            logger.debug("setValueFollowup {0}".format(inst.value))
+            if not inst.setValue(value):
+                delay = int(inst.settings.delay.m_as('ms'))
+                QtCore.QTimer.singleShot(delay, functools.partial(self.setValueFollowup, inst, None))
         except Exception as e:
             logger.exception(e)
-            logger.warning( "Exception during setValueFollowup, number of adjusting devices likely to be faulty")
+            logger.warning("Exception during setValueFollowup, number of adjusting devices likely to be faulty")
 
     def update(self, iterable):
         for destination, name, value in iterable:
@@ -133,7 +133,7 @@ class ExternalParameterControlModel(CategoryTreeModel):
                 
     def evaluate(self, name):
         for inst in self.parameterList:
-            if inst.hasDependency:
+            if (name is None or inst.name == name) and inst.hasDependency:
                 value = self.expression.evaluateAsMagnitude(inst.string, self.controlUi.globalDict)
                 self._setValue(inst, value)
                 inst.savedValue = value   # set saved value to make this new value the default
@@ -175,10 +175,10 @@ class ControlUi(Form, Base):
             if key not in oldNodeDictKeys: #Expand any new nodes
                 index = self.categoryTreeView.model().indexFromNode(node)
                 self.categoryTreeView.expand(index)
-        try:
-            self.evaluate(None)
-        except (KeyError, ValueError) as e:
-            logging.getLogger(__name__).warning(str(e))
+                try:
+                    self.evaluate(key)
+                except (KeyError, ValueError) as e:
+                    logging.getLogger(__name__).warning(str(e))
         
     def keys(self):
         pList = self.categoryTreeView.model().parameterList

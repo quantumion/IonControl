@@ -26,12 +26,28 @@ def is_Q(q):
     return isinstance(q, Q)
 
 
-def value(q, unit=None):
+def to_Q(value, unit):
+    try:
+        return (Q(v, unit) for v in value)
+    except TypeError:  # not iterable
+        return Q(value, unit)
+
+
+def value(q, unit=""):
     if is_Q(q):
         return q.m_as(unit)
     if not unit or not q:
         return q
     raise ValueError("no defined value for {0} in units '{1}'".format(q, unit))
+
+
+def chop(q, unit=None):
+    if not is_Q(q):
+        return q
+    try:
+        return q.m_as(unit)
+    except Exception:
+        return q.m
 
 
 def mag_unit(q):

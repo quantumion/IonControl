@@ -29,10 +29,11 @@ class EncodingError(Exception):
 
 class Encoding:
     def __init__(self, maxvalue=None, bits=16, unit='', signed=True, representation=Representation.TwosComplement,
-                 step=None):
+                 step=None, periodic=False, maskbits=None):
         self.bits = bits
         self.unit = unit
         self.signed = signed
+        self.periodic = periodic
         if maxvalue is None:
             self.step = value(step, unit)
             self.maxvalue = self.step * ((1 << (self.bits - 1) - 1) if signed else (1 << self.bits) - 1)
@@ -41,7 +42,7 @@ class Encoding:
             self.maxvalue = value(maxvalue, unit)
             self.minvalue = -self.maxvalue if signed else 0
             self.step = (self.maxvalue - self.minvalue) / (1 << self.bits) if step is None else step
-        self.mask = (1 << self.bits) - 1
+        self.mask = ((1 << maskbits) - 1) if maskbits is not None else ((1 << self.bits) - 1)
         self.offsetValue = self.minvalue if representation == Representation.Offset and signed else 0
 
     def encode(self, v):
@@ -52,6 +53,9 @@ class Encoding:
         if self.minvalue <= v < self.maxvalue:
             v += self.offsetValue
             return int(round(v / self.step)) & self.mask
+        elif self.periodic and self.minvalue == 0:
+            v += self.offsetValue
+            return int(round((v % self.maxvalue) / self.step)) & self.mask
         else:
             raise EncodingError("Value {0} out of range {1}, {2}".format(v, Q(self.minvalue, self.unit), Q(self.maxvalue, self.unit)))
 
@@ -88,12 +92,15 @@ unsigned64 = BinaryEncoding((1 << 64) - 1, 64, step=1, signed=False)
 signagnostic64 = BinaryEncoding((1 << 64) - 1, 64, step=1, signed=True)
 
 EncodingDict = {'AD9912_FRQ': Encoding(Q(1, 'GHz'), 48, 'Hz', signed=False),
+                'AD9912_FRQ_SIGN': Encoding(Q(1, 'GHz'), 48, 'Hz', signed=True, maskbits=64),
                 'AD9910_FRQ': Encoding(Q(1, 'GHz'), 32, 'Hz', signed=False),
-                'AD9912_PHASE': Encoding(Q(360), 14, '', signed=False),
-                'AD9910_PHASE': Encoding(Q(360), 16, '', signed=False),
+                'AD9912_PHASE': Encoding(Q(360), 14, '', signed=False, periodic=True),
+                'AD9910_PHASE': Encoding(Q(360), 16, '', signed=False, periodic=True),
                 'ADC_VOLTAGE': Encoding(Q(5, 'V'), 12, 'V', signed=False),
                 'ADCTI122S101_VOLTAGE': Encoding(Q(3.33, 'V'), 12, 'V', signed=False),
                 'DAC8568_VOLTAGE': Encoding(Q(5, 'V'), 16, 'V', signed=False),
+                'DAC5791_VOLTAGE': Encoding(Q(5, 'V'), 20, 'V', signed=True),
+                'ADC7762_VOLTAGE': Encoding(Q(5, 'V'), 24, 'V', signed=True),
                 'ADC7606_VOLTAGE': Encoding(Q(5, 'V'), 16, 'V', signed=True),
                 'ADC7606_VOLTAGE_OFFSET': Encoding(Q(5, 'V'), 16, 'V', signed=True,
                                                    representation=Representation.Offset),

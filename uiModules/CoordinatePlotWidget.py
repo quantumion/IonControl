@@ -16,14 +16,18 @@ from pyqtgraph.graphicsItems.LabelItem import LabelItem
 from pyqtgraph.graphicsItems.ButtonItem import ButtonItem
 from pyqtgraph.graphicsItems.PlotItem.PlotItem import PlotItem
 from pyqtgraph.graphicsItems.ViewBox import ViewBox
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 import math
 import numpy
+import itertools
 from modules.round import roundToNDigits
 import logging
 from pyqtgraphAddons.DateAxisItem import DateAxisItem
 from datetime import datetime
 from pyqtgraph.graphicsItems.AxisItem import AxisItem
+from uiModules.KeyboardFilter import KeyListFilter
+from functools import partial
+from uiModules.FilterROI import FilterROI
 
 grid_opacity = 0.3
 import os
@@ -120,6 +124,9 @@ class CustomPlotItem(PlotItem):
         Create a new CustomPlotItem. In addition to the ordinary PlotItem, adds buttons and uses the custom ViewBox.
         """
         cvb = CustomViewBox()
+        if kargs.get('dateAxis', False):
+            self.dateAxisItem = DateAxisItem('bottom')
+            kargs['axisItems'] = {'bottom': self.dateAxisItem}
         super(CustomPlotItem, self).__init__(parent, viewBox = cvb, **kargs)
         self.unityRangeBtn = ButtonItem(imageFile=range_icon_file, width=14, parentItem=self)
         self.unityRangeBtn.setToolTip("Set y range to (0,1)")
@@ -130,7 +137,7 @@ class CustomPlotItem(PlotItem):
         self.autoBtn.setToolTip("Autorange x and y axes")
         self.showGrid(x = True, y = True, alpha = grid_opacity) #grid defaults to on
         self.allButtonsHidden = False
-        
+
     def hideAllButtons(self, hide):
         self.allButtonsHidden = hide
         if self.allButtonsHidden:
@@ -190,6 +197,8 @@ class CustomPlotItem(PlotItem):
 class CoordinatePlotWidget(pg.GraphicsLayoutWidget):
     """This is the main widget for plotting data. It consists of a plot, a
        coordinate display, and custom buttons."""
+    ROIBoundsSignal = QtCore.pyqtSignal(list, list, bool) #list of strings with trace creation dates
+    #ROIBoundsCancel = QtCore.pyqtSignal() #list of strings with trace creation dates
     def __init__(self, parent=None, axisItems=None, name=None):
         pg.setConfigOption('background', 'w')
         pg.setConfigOption('foreground', 'k')
@@ -200,16 +209,152 @@ class CoordinatePlotWidget(pg.GraphicsLayoutWidget):
         self._graphicsView.scene().sigMouseMoved.connect(self.onMouseMoved)
         self.template = "<span style='font-size: 10pt'>x={0}, <span style='color: red'>y={1}</span></span>"
         self.mousePoint = None
+        self.ROIEnabled = False
+        self.filterType = True
         self.mousePointList = list()
         self._graphicsView.showGrid(x = True, y = True, alpha = grid_opacity) #grid defaults to on
+        self.label_index = None
+
+        # add option to set plot title to pyqtgraph's Plot Options context menu
+        titleMenu = QtWidgets.QMenu(self._graphicsView.ctrlMenu)
+        titleMenu.setTitle("Set Title")
+        tlbl = QtWidgets.QLabel('Title:', self)
+        thbox = QtWidgets.QHBoxLayout()
+        titleMenuItem = QtGui.QWidgetAction(self._graphicsView.vb.menu.axes[0])
+        titleWidget = QtWidgets.QLineEdit()
+        titleWidget.textEdited.connect(self.onSetTitle)
+        thbox.addWidget(tlbl)
+        thbox.addWidget(titleWidget)
+        twidgetContainer = QtWidgets.QWidget()
+        twidgetContainer.setLayout(thbox)
+        titleMenuItem.setDefaultWidget(twidgetContainer)
+        titleMenu.addAction(titleMenuItem)
+        self._graphicsView.ctrlMenu.titleMenuItem = titleMenuItem
+        self._graphicsView.ctrlMenu.titleWidget = titleWidget
+        self._graphicsView.ctrlMenu.addMenu(titleMenu)
+
+        # modify pyqtgraph's X Axis context menu to allow for changes in xlabel
+        xlbl = QtWidgets.QLabel('xLabel:', self)
+        xhbox = QtWidgets.QHBoxLayout()
+        xlabelMenuItem = QtGui.QWidgetAction(self._graphicsView.vb.menu.axes[0])
+        xlabelWidget = QtWidgets.QLineEdit()
+        xlabelWidget.textEdited.connect(self.onRelabelXAxis)
+        xhbox.addWidget(xlbl)
+        xhbox.addWidget(xlabelWidget)
+        xwidgetContainer = QtWidgets.QWidget()
+        xwidgetContainer.setLayout(xhbox)
+        xlabelMenuItem.setDefaultWidget(xwidgetContainer)
+        self._graphicsView.vb.menu.axes[0].addAction(xlabelMenuItem)
+        self._graphicsView.vb.menu.axes[0].xlabelMenuItem = xlabelMenuItem
+        self._graphicsView.vb.menu.axes[0].xlabelWidget = xlabelWidget
+
+        # modify pyqtgraph's Y Axis context menu to allow for changes in ylabel
+        ylbl = QtWidgets.QLabel('yLabel:', self)
+        yhbox = QtWidgets.QHBoxLayout()
+        ylabelMenuItem = QtGui.QWidgetAction(self._graphicsView.vb.menu.axes[0])
+        ylabelWidget = QtWidgets.QLineEdit()
+        ylabelWidget.textEdited.connect(self.onRelabelYAxis)
+        yhbox.addWidget(ylbl)
+        yhbox.addWidget(ylabelWidget)
+        ywidgetContainer = QtWidgets.QWidget()
+        ywidgetContainer.setLayout(yhbox)
+        ylabelMenuItem.setDefaultWidget(ywidgetContainer)
+        self._graphicsView.vb.menu.axes[1].addAction(ylabelMenuItem)
+        self._graphicsView.vb.menu.axes[1].ylabelMenuItem = ylabelMenuItem
+        self._graphicsView.vb.menu.axes[1].ylabelWidget = ylabelWidget
+
         action = QtWidgets.QAction("toggle time axis", self._graphicsView.ctrlMenu)
         action.triggered.connect( self.onToggleTimeAxis )
         self._graphicsView.ctrlMenu.addAction(action)
         self.timeAxis = False
-        
+
+        #filterAction = QtWidgets.QAction("Select Filter Region", self._graphicsView.ctrlMenu)
+        #filterAction.triggered.connect( self.onFilterROI )
+        #self._graphicsView.ctrlMenu.addAction(filterAction)
+
+        self.acceptROI = KeyListFilter( [QtCore.Qt.Key_Enter, QtCore.Qt.Key_Return] )
+        self.acceptROI.keyPressed.connect( self.getROICoords )
+        self._graphicsView.installEventFilter(self.acceptROI)
+
+        self.cancelROI = KeyListFilter( [QtCore.Qt.Key_Escape] )
+        self.cancelROI.keyPressed.connect( self.removeROI )
+        self._graphicsView.installEventFilter(self.cancelROI)
+
+        self.toggleFilterType = KeyListFilter( [QtCore.Qt.Key_Space, QtCore.Qt.Key_T] )
+        self.toggleFilterType.keyPressed.connect( partial(self.onChangeFilterType, None) )
+        self._graphicsView.installEventFilter(self.toggleFilterType)
+
+        self.setDisableFilterType = KeyListFilter( [QtCore.Qt.Key_D] )
+        self.setDisableFilterType.keyPressed.connect( partial(self.onChangeFilterType, True) )
+        self._graphicsView.installEventFilter(self.setDisableFilterType)
+
+        self.setEnableFilterType = KeyListFilter( [QtCore.Qt.Key_E] )
+        self.setEnableFilterType.keyPressed.connect( partial(self.onChangeFilterType, False) )
+        self._graphicsView.installEventFilter(self.setEnableFilterType)
+
+    @property
+    def ROIColor(self):
+        return "A00" if self.filterType else "0A0"
+
+    def onChangeFilterType(self, ftype=None):
+        if self.ROIEnabled:
+            if ftype is None:
+                self.filterType = not self.filterType
+            else:
+                self.filterType = ftype
+            self.filtROI.setPen({'color': self.ROIColor, 'width': 2, 'style': QtCore.Qt.DashLine})
+
+    def onFilterROI(self):
+        if not self.ROIEnabled:
+            self.ROIEnabled = True
+            vR = self._graphicsView.vb.viewRange()
+            meanY = (vR[1][1]+vR[1][0])/2
+            meanX = (vR[0][1]+vR[0][0])/2
+            deltaY = (vR[1][1]-vR[1][0])/4
+            deltaX = (vR[0][1]-vR[0][0])/4
+            lowerLeftCorner = [meanX-deltaX, meanY-deltaY]
+            upperRightCorner = [2*deltaX, 2*deltaY]
+            self.filtROI = FilterROI(self, lowerLeftCorner, upperRightCorner, removable=True)
+            self.filtROI.handlePen = QtGui.QPen(QtGui.QColor(0,0,0))
+            self.filtROI.handleSize = 5
+            # next 3 lines are shorthand for constructing all scale handles on the ROI,
+            # pos is the handle position, spos is the position about which the handle scales
+            # if edge handles (as opposed to corner handles) need to be removed, get rid of .5 in the permutations call
+            handleCoords = [(0,0), (1,1), *itertools.permutations([0, .5, 1], 2)]
+            for pos, spos in map(lambda tp: [list(tp), list(map(lambda x: .5-1*(x-.5), tp))], handleCoords):
+                self.filtROI.addScaleHandle(pos, spos).pen.setWidth(2)
+            self.filtROI.setPen({'color': self.ROIColor, 'width': 2, 'style': QtCore.Qt.DashLine})
+            self._graphicsView.addItem(self.filtROI)
+
+    def getROICoords(self):
+        if self.ROIEnabled:
+            xbounds = [self.filtROI.pos()[0], self.filtROI.pos()[0] + self.filtROI.size()[0]]
+            ybounds = [self.filtROI.pos()[1], self.filtROI.pos()[1] + self.filtROI.size()[1]]
+            self._graphicsView.removeItem(self.filtROI)
+            self.ROIBoundsSignal.emit(xbounds, ybounds, self.filterType)
+            self.ROIEnabled = False
+            self.filterType = True
+            return self.filtROI.getSceneHandlePositions()
+
+    def removeROI(self):
+        if self.ROIEnabled:
+            self.ROIBoundsSignal.emit([],[], False)
+            self._graphicsView.removeItem(self.filtROI)
+            self.ROIEnabled = False
+            self.filterType = True
+
     def onToggleTimeAxis(self):
         self.setTimeAxis( not self.timeAxis )
-        
+
+    def onSetTitle(self, title):
+        self._graphicsView.setTitle(title)
+
+    def onRelabelXAxis(self, xlabel):
+        self._graphicsView.setLabel('bottom', text = "{0}".format(xlabel))
+
+    def onRelabelYAxis(self, ylabel):
+        self._graphicsView.setLabel('left', text = "{0}".format(ylabel))
+
     def setTimeAxis(self, timeAxis=False):
         if timeAxis:
             dateAxisItem = DateAxisItem(orientation='bottom') 
@@ -281,13 +426,16 @@ class CoordinatePlotWidget(pg.GraphicsLayoutWidget):
                     logX = self._graphicsView.ctrl.logXCheck.isChecked()
                     y = self.mousePoint.y() if not logY else pow(10, self.mousePoint.y())
                     x = self.mousePoint.x() if not logX else pow(10, self.mousePoint.x())
-                    vR = self._graphicsView.vb.viewRange()
-                    deltaY = vR[1][1]-vR[1][0] if not logY else pow(10, vR[1][1])-pow(10, vR[1][0]) #Calculate x and y display ranges
-                    deltaX = vR[0][1]-vR[0][0] if not logX else pow(10, vR[0][1])-pow(10, vR[0][0])
-                    precx = int( math.ceil( math.log10(abs(x/deltaX)) ) + 3 ) if x!=0 and deltaX>0 else 1
-                    precy = int( math.ceil( math.log10(abs(y/deltaY)) ) + 3 ) if y!=0 and deltaY>0 else 1
-                    roundedx, roundedy = roundToNDigits( x, precx), roundToNDigits(y, precy )
-                    self.coordinateLabel.setText( self.template.format( repr(roundedx), repr(roundedy) ))
+                    if self.label_index is None:
+                        vR = self._graphicsView.vb.viewRange()
+                        deltaY = vR[1][1]-vR[1][0] if not logY else pow(10, vR[1][1])-pow(10, vR[1][0]) #Calculate x and y display ranges
+                        deltaX = vR[0][1]-vR[0][0] if not logX else pow(10, vR[0][1])-pow(10, vR[0][0])
+                        precx = int( math.ceil( math.log10(abs(x/deltaX)) ) + 3 ) if x!=0 and deltaX>0 else 1
+                        precy = int( math.ceil( math.log10(abs(y/deltaY)) ) + 3 ) if y!=0 and deltaY>0 else 1
+                        roundedx, roundedy = roundToNDigits( x, precx), roundToNDigits(y, precy )
+                        self.coordinateLabel.setText( self.template.format( repr(roundedx), repr(roundedy) ))
+                    else:
+                        self.coordinateLabel.setText(self.label_index.get((round(x), round(y)), ''))
                 except numpy.linalg.linalg.LinAlgError:
                     pass
                     

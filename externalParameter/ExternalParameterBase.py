@@ -3,6 +3,8 @@
 # This Software is released under the GPL license detailed
 # in the file "license.txt" in the top-level IonControl directory
 # *****************************************************************
+from collections import OrderedDict
+
 from PyQt5 import QtCore
 from pyqtgraph.parametertree import Parameter
 import logging
@@ -43,7 +45,7 @@ class ExternalParameterBase(object, metaclass=InstrumentMeta):
 
     def createOutputChannels(self):
         """create all output channels"""
-        self.outputChannels = dict( [(channel, SlowAdjustOutputChannel(self, self.name, channel, self.globalDict, self.settings.channelSettings.get(channel, dict()), unit)) 
+        self.outputChannels = OrderedDict( [(channel, SlowAdjustOutputChannel(self, self.name, channel, self.globalDict, self.settings.channelSettings.get(channel, dict()), unit))
                                     for channel, unit in self._outputChannels.items()] )
         
     def lastOutputValue(self, channel):
@@ -57,7 +59,10 @@ class ExternalParameterBase(object, metaclass=InstrumentMeta):
 
     def dimension(self, channel):
         """return the dimension eg 'Hz' or 'V' for channel""" 
-        return self._outputChannels[channel] 
+        return self._outputChannels[channel]
+
+    def setParameters(self):
+        pass
         
     @property
     def parameter(self):
@@ -68,14 +73,18 @@ class ExternalParameterBase(object, metaclass=InstrumentMeta):
         
     def setDefaults(self, settings=None):
         if settings is None:
-            self.settings.__dict__.setdefault('channelSettings', dict())
+            settings = self.settings
+        settings.__dict__.setdefault('channelSettings', dict())
+        settings.__dict__.setdefault('setExternal', False)
+        for cname in self._outputChannels:
+            settings.channelSettings.setdefault(cname, InstrumentSettings())
+
+    def initOutput(self):
+        if self.settings.setExternal:
             for cname in self._outputChannels:
-                self.settings.channelSettings.setdefault( cname, InstrumentSettings() )
-        else:
-            settings.__dict__.setdefault('channelSettings', dict())
-            for cname in self._outputChannels:
-                settings.channelSettings.setdefault( cname, InstrumentSettings() )
-               
+                self.setValue(cname, self.settings.channelSettings[cname].targetValue)
+            self.setParameters()
+
     def setValue(self, channel, v):
         """write the value to the instrument"""
         return None
@@ -94,7 +103,7 @@ class ExternalParameterBase(object, metaclass=InstrumentMeta):
         """
         return the parameter definition used by pyqtgraph parametertree to show the gui
         """
-        return []
+        return [{'name': 'setExternal', 'type': 'bool', 'value': self.settings.setExternal}]
         
     def update(self, param, changes):
         """

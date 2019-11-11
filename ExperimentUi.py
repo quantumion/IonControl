@@ -3,9 +3,11 @@
 # This Software is released under the GPL license detailed
 # in the file "license.txt" in the top-level IonControl directory
 # *****************************************************************
-
+import cProfile
+import pstats
 import webbrowser
 
+import time
 from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 import PyQt5.uic
 
@@ -14,6 +16,9 @@ from ProjectConfig.Project import Project, ProjectInfoUi
 import sys
 import logging
 import os
+
+from dedicatedCounters.WavemeterInterlock import Interlock
+from dedicatedCounters.WavemeterInterlockUi import WavemeterInterlockUi
 from modules.SequenceDict import SequenceDict
 from functools import partial
 from GlobalVariables.GlobalVariablesUi import GlobalVariablesUi
@@ -47,6 +52,7 @@ from pulser.PulserHardwareServer import PulserHardwareException
 from gui.FPGASettings import FPGASettings
 from gui.StashButton import StashButtonControl
 from expressionFunctions import UserFunctions
+from expressionFunctions.UserFuncImporter import userFuncLoader
 from ProjectConfig.Project import getProject
 from pathlib import Path
 import importlib
@@ -59,6 +65,10 @@ import scan.FitHistogramsEvaluation
 import Experiment_rc
 from AWG.AWGUi import AWGUi
 from AWG import AWGDevices
+from pygsti_addons import yaml as _yaml
+from persist import Timeseries
+
+_ = Timeseries.TimeseriesPersist  # We want this imported
 
 setID = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
 if __name__=='__main__': #imports that aren't just definitions
@@ -111,13 +121,10 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         self.dbConnection = project.dbConnection
         self.objectListToSaveContext = list()
         self.voltageControlWindow = None
+        self.profilingEnabled = False
 
         localpath = getProject().configDir+'/UserFunctions/'
-        for filename in Path(localpath.replace('\\','/')).glob('**/*.py'):
-            try:
-                importlib.machinery.SourceFileLoader("CustomFunctions", str(filename).replace('\\','/')).load_module()
-            except SyntaxError as e:
-                SyntaxError('Failed to load {0}'.format(str(filename)))
+        userFuncLoader(localpath)
 
     def __enter__(self):
         self.pulser = PulserHardware()
@@ -188,6 +195,15 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
                     list(self.project.hardware['Lab Brick'].values())[0]['dllPath'])
             except Exception as e:  # popup on failed import
                 importErrorPopup('Lab Brick error {0}'.format(e))
+        if self.project.isEnabled('hardware', 'Remote Lab Brick'):
+            try:
+                from externalParameter import RemoteLabBrick  # @UnusedImport
+                for name, e in self.project.hardware['Remote Lab Brick'].items():
+                    if e['enabled']:
+                        serverConfig = RemoteLabBrick.RemoteLabBrickConfig(name, e['serverUrl'], e['auth'], e['clientKey'], e['clientCertificate'], e['rootCertificates'])
+                        RemoteLabBrick.Servers[name] = serverConfig
+            except Exception as e:  # popup on failed import
+                importErrorPopup('Remote Lab Brick error {0}'.format(e))
         from externalParameter.ExternalParameterBase import InstrumentDict
 
         # setup FPGAs
@@ -199,8 +215,24 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         self.triggerNameDict.defaultDict = pulserConfig.triggerBits if pulserConfig else dict()
         self.counterNameDict = pulserConfig.counterBits if pulserConfig else dict()
         self.channelNameData = (self.shutterNameDict, self.shutterNameSignal, self.triggerNameDict, self.triggerNameSignal, self.counterNameDict )
-        self.pulseProgramDialog = PulseProgramUi.PulseProgramSetUi(self.config,  self.channelNameData )
+        self.pulseProgramDialog = PulseProgramUi.PulseProgramSetUi(self.config,  self.channelNameData, pulser=self.pulser)
         self.pulseProgramDialog.setupUi(self.pulseProgramDialog)
+
+        # Wavemeter Interlock
+        self.wavemeterInterlock = None
+        wmSetup = self.project.hardware.get('HighFinesse Wavemeter')
+        if wmSetup:
+            wavemeters = {name: v.get("uri") for name, v in wmSetup.items() if v.get('enabled')}
+            if wavemeters:
+                self.wavemeterInterlock = Interlock(wavemeters=wavemeters, config=self.config)
+                self.wavemeterInterlockUi = WavemeterInterlockUi(wavemeterNames=list(wavemeters.keys()),
+                                                                 channels=self.wavemeterInterlock.channels,
+                                                                 contexts=self.wavemeterInterlock.contexts)
+                self.wavemeterInterlockUi.setupUi(self.wavemeterInterlockUi)
+                self.interlockDock = QtWidgets.QDockWidget("Wavemeter Interlock")
+                self.interlockDock.setObjectName("Wavemeter Interlock")
+                self.interlockDock.setWidget(self.wavemeterInterlockUi)
+                self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.interlockDock)
 
         # Global Variables
         self.globalVariablesUi = GlobalVariablesUi(self.config)
@@ -228,6 +260,7 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
                                                             "ScanExperiment", toolBar=self.experimentToolBar,
                                                             measurementLog=self.measurementLog,
                                                             callWhenDoneAdjusting=self.callWhenDoneAdjusting,
+                                                            interlock=self.wavemeterInterlock,
                                                             preferences=self.preferencesUi.preferences().printPreferences),
                               "Scan")
                              ]:
@@ -243,6 +276,7 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
             widget.stashChanged.connect(self.onStashChanged)
 
         self.scanExperiment = self.tabDict["Scan"]
+        self.scanExperiment.updateScanTarget('Global', self.globalVariablesUi.globalDict.outputChannels())
 
         self.shutterUi, self.shutterDockWidget = self.instantiateShutterUi(self.pulser, 'Shutters', "ShutterUi", self.config, self.globalVariablesUi.globalDict, self.shutterNameDict, self.shutterNameSignal)
 
@@ -300,7 +334,7 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         #self.tabDict['Scan'].NeedsDDSRewrite.connect( self.DDSUi9910.onWriteAll )
         self.instantiateAuxiliaryPulsers()
 
-        self.valueHistoryUi = ValueHistoryUi(self.config, self.dbConnection)
+        self.valueHistoryUi = ValueHistoryUi(self.config, self.dbConnection, globaldict=self.globalVariablesUi.globalDict)
         self.valueHistoryUi.setupUi( self.valueHistoryUi )
         self.valueHistoryDock = QtWidgets.QDockWidget("Value History")
         self.valueHistoryDock.setWidget( self.valueHistoryUi )
@@ -346,8 +380,12 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
                
         self.ExternalParametersSelectionUi.outputChannelsChanged.connect( partial(self.scanExperiment.updateScanTarget, 'External') )               
         self.scanExperiment.updateScanTarget( 'External', self.ExternalParametersSelectionUi.outputChannels() )
-        
-        self.todoList = TodoList( self.tabDict, self.config, self.getCurrentTab, self.switchTab, self.globalVariablesUi )
+
+        # initialize ScriptingUi
+        self.scriptingWindow = ScriptingUi(self)
+        self.scriptingWindow.setupUi(self.scriptingWindow)
+
+        self.todoList = TodoList(self.tabDict, self.config, self.getCurrentTab, self.switchTab, self.globalVariablesUi, self.scriptingWindow)
         self.todoList.setupUi()
         self.todoListDock = QtWidgets.QDockWidget("Todo List")
         self.todoListDock.setWidget(self.todoList)
@@ -375,6 +413,7 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         self.actionSave_GUI.triggered.connect(self.onSaveGUI)
         self.actionSave_GUI_Yaml.triggered.connect(self.onSaveGUIYaml)
 
+        self.actionProfiling.triggered.connect(self.setProfiling)
         self.actionStart.triggered.connect(self.onStart)
         self.actionStop.triggered.connect(self.onStop)
         self.actionAbort.triggered.connect(self.onAbort)
@@ -397,6 +436,7 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         self.currentTab = self.tabDict.at( min(len(self.tabDict)-1, self.config.get('MainWindow.currentIndex',0) ) )
         self.tabWidget.setCurrentIndex( self.config.get('MainWindow.currentIndex',0) )
         self.currentTab.activate()
+        self.actionForceDock.triggered.connect(self.onForceDock)
         if hasattr( self.currentTab, 'stateChanged' ):
             self.currentTab.stateChanged.connect( self.todoList.onStateChanged )
         if 'MainWindow.State' in self.config:
@@ -413,7 +453,11 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         else:
             self.showMaximized()
             
-        self.dedicatedCountersWindow = DedicatedCounters(self.config, self.dbConnection, self.pulser, self.globalVariablesUi, self.shutterUi,self.ExternalParametersUi.callWhenDoneAdjusting )
+        self.dedicatedCountersWindow = DedicatedCounters(self.config, self.dbConnection, self.pulser,
+                                                         self.globalVariablesUi, self.shutterUi,
+                                                         self.ExternalParametersUi.callWhenDoneAdjusting,
+                                                         self.wavemeterInterlock,
+                                                         remoteRender=self.project.isEnabled('software', 'Remote render'))
         self.dedicatedCountersWindow.setupUi(self.dedicatedCountersWindow)
         
         self.logicAnalyzerWindow = LogicAnalyzer(self.config, self.pulser, self.channelNameData )
@@ -454,17 +498,13 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
             if hasattr(widget, 'addPushDestination'):
                 widget.addPushDestination( 'External', self.ExternalParametersUi )
                 
-        # initialize ScriptingUi
-        self.scriptingWindow = ScriptingUi(self)
-        self.scriptingWindow.setupUi(self.scriptingWindow)
+        ## initialize ScriptingUi
+        #self.scriptingWindow = ScriptingUi(self)
+        #self.scriptingWindow.setupUi(self.scriptingWindow)
 
         # this is redundant in __init__ but this resolves issues with user-defined functions that reference NamedTraces
         localpath = getProject().configDir+'/UserFunctions/'
-        for filename in Path(localpath.replace('\\','/')).glob('**/*.py'):
-            try:
-                importlib.machinery.SourceFileLoader("CustomFunctions", str(filename).replace('\\','/')).load_module()
-            except SyntaxError as e:
-                SyntaxError('Failed to load {0}'.format(str(filename)))
+        userFuncLoader(localpath)
 
         # initialize NamedTraceUi
         self.userFunctionsEditor = UserFunctionsEditor(self, self.globalVariablesUi.globalDict)
@@ -540,7 +580,8 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         self.dedicatedCountersWindow.show()
         self.dedicatedCountersWindow.setWindowState(QtCore.Qt.WindowActive)
         self.dedicatedCountersWindow.raise_()
-        self.dedicatedCountersWindow.onStart() #Start displaying data immediately
+        self.dedicatedCountersWindow.onEnableDataTaking(True) #Start displaying data immediately
+        self.dedicatedCountersWindow.onEnableDataPlotting(True)
 
     def showLogicAnalyzer(self):
         self.logicAnalyzerWindow.show()
@@ -602,6 +643,23 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
     def onStart(self, checked=False, globalOverrides=list()):
         self.currentTab.onStart(globalOverrides)
 
+    def setProfiling(self, checked=False):
+        if checked:
+            self.profile = cProfile.Profile()
+            self.profile.enable()
+            self.profilingEnabled = True
+            self.profilingStartTime = time.time()
+        else:
+            self.profile.disable()
+            self.profilingEnabled = False
+            sortby = 'tottime'
+            ps = pstats.Stats(self.profile).sort_stats(sortby)
+            ps.print_stats()
+            timestr = time.strftime("%Y%m%d_%H%M", time.localtime())
+            duration = int(time.time() - self.profilingStartTime)
+            filename = "profile_{}_{}.pkl".format(timestr, duration)
+            ps.dump_stats(filename)
+
     def onStash(self):
         if hasattr(self.currentTab, 'onStash'):
             self.currentTab.onStash()
@@ -652,7 +710,10 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
                 self.currentTab.stateChanged.connect( self.todoList.onStateChanged )
             self.initMenu()
             self.actionResume.setEnabled(self.currentTab.stashSize())
-        
+
+    def onForceDock(self, *args):
+        self.todoListDock.setFloating(not self.todoListDock.isFloating())
+
     def initMenu(self):
         """setup print and view menus"""
         #view menu
@@ -724,6 +785,7 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         #map(lambda x: x.shutdown(), self.auxiliaryPulsers)
         for p in self.auxiliaryPulsers:
             p.shutdown()
+        self.dac.shutdown()
 
     def saveConfig(self):
         self.config['MainWindow.State'] = self.parent.saveState()
@@ -759,6 +821,8 @@ class ExperimentUi(WidgetContainerBase,WidgetContainerForm):
         list(map(lambda x: x.saveConfig(), self.objectListToSaveContext))  # call saveConfig() for each element in the list
         for awgUi in self.AWGUiDict.values():
             awgUi.saveConfig()
+        if self.wavemeterInterlock is not None:
+            self.wavemeterInterlock.saveConfig()
         
     def onProjectSelection(self):
         ui = ProjectInfoUi(self.project)

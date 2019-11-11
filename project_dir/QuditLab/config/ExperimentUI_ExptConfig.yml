@@ -1,0 +1,28 @@
+databaseConnection:
+  database: quditlab
+  echo: false
+  host: localhost
+  password: ''
+  port: 5432
+  user: python
+hardware:
+  DG4000 AWG:
+    null:
+      enabled: true
+  Opal Kelly FPGA:
+    null:
+      bitFile: C:/Users/ions/Desktop/IonControl/FPGA_Ions/IonControl-firmware-no-div.bit
+      device: Pulser
+      enabled: true
+      uploadOnStartup: true
+  VISA:
+    null:
+      enabled: true
+showGui: true
+software:
+  Pulser:
+    null:
+      enabled: true
+      hardware: Opal Kelly FPGA
+useCustomDatabaseName: false
+version: 2.0

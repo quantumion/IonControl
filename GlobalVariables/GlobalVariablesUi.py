@@ -25,19 +25,24 @@ class GlobalVariablesUi(Form, Base):
         self.config = config
         self.configName = 'GlobalVariables'
         try:
-            storedGlobals = self.config.get(self.configName, dict())
-            if storedGlobals.__class__==list: #port over globals stored as a list
-                storedGlobals = {g.name:g for g in storedGlobals}
-            if type(storedGlobals) is not dict:
-                storedGlobals = dict(storedGlobals)
-            # make sure that GlobalVariable type is the newest type
-            for key in storedGlobals.keys():
-                if not hasattr(storedGlobals[key], '_name'):
-                    oldCategories = storedGlobals[key].__dict__.get('categories', None)
-                    storedGlobals[key] = GlobalVariable(key, storedGlobals[key].value, oldCategories)
+            storedGlobals = dict(self.config.items_startswith(self.configName + ".dict."))
+            if not storedGlobals:
+                storedGlobals = self.config.get(self.configName, dict())
+                if storedGlobals.__class__==list: #port over globals stored as a list
+                    storedGlobals = {g.name:g for g in storedGlobals}
+                if type(storedGlobals) is not dict:
+                    storedGlobals = dict(storedGlobals)
+                # make sure that GlobalVariable type is the newest type
+                for key in storedGlobals.keys():
+                    if not hasattr(storedGlobals[key], '_name'):
+                        oldCategories = storedGlobals[key].__dict__.get('categories', None)
+                        storedGlobals[key] = GlobalVariable(key, storedGlobals[key].value, oldCategories)
         except:
             storedGlobals = dict()
         self._globalDict_ = storedGlobals
+        # make sure the internal name matches the key
+        for key, value in self._globalDict_.items():
+            value._name = key
         self.globalDict = GlobalVariablesLookup(self._globalDict_)
 
     @property
@@ -175,7 +180,7 @@ class GlobalVariablesUi(Form, Base):
 
     def saveConfig(self):
         """save gui configuration state and _globalDict_"""
-        self.config[self.configName] = self._globalDict_
+        self.config.set_string_dict(self.configName + ".dict", self._globalDict_)
         self.config[self.configName+".guiState"] = saveGuiState(self)
         self.config[self.configName+".showGrid"] = self.model.showGrid
         try:

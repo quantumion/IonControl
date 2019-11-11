@@ -13,7 +13,7 @@ import re
 import os
 import struct
 import copy
-import xml.etree.ElementTree as ElementTree
+import lxml.etree as ElementTree
 
 from modules.XmlUtilit import xmlEncodeAttributes, xmlParseAttributes
 from modules.quantity import Q
@@ -120,9 +120,18 @@ OPS = {'NOP'    : 0x00,
        'DACOUT': 0x5b,
        'LDACTIVE': 0x5c,
        'JMPNINTERRUPT': 0x5d,
+       'LDADCCOUNT': 0x5e,
+       'LDADCSUM': 0x5f,
        'RAND': 0x60,
        'RANDSEED': 0x61,
-       'END'    : 0xFF }
+       'SETSYNCTIME' : 0x62,
+       'WAITFORSYNC' : 0x63,
+       'PUSH': 0x64,
+       'POP': 0x65,
+       'JMPPUSH': 0x66,
+       'JMPPOP': 0x67,
+       'SENDENABLEMASK': 0x68,
+       'END': 0xFF}
 
 
 class Variable:
@@ -239,7 +248,7 @@ class PulseProgram:
         toBinary()      generates self.binarycode
     the procedure updateVariables( dictionary )  updates variable values in the bytecode
     """    
-    def __init__(self):
+    def __init__(self, ddsnum=8):
         self.variabledict = collections.OrderedDict()        # keeps information on all variables to easily change them later
         self.labeldict = dict()          # keep information on all labels
         self.source = collections.OrderedDict()             # dictionary of source code files (stored as strings)
@@ -253,8 +262,8 @@ class PulseProgram:
         class Board:
             channelLimit = 1    
             halfClockLimit = 500000000
-        self.adIndexList = [(x, 0) for x in range(8) ]
-        self.adBoards = [ Board() ]*8
+        self.adIndexList = [(x, 0) for x in range(ddsnum) ]
+        self.adBoards = [ Board() ]*ddsnum
         
         self.timestep = timestep
         self.sourcelines = []

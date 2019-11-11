@@ -10,7 +10,7 @@ from scipy.special import genlaguerre
 
 from .FitFunctionBase import ResultRecord
 from fit.FitFunctionBase import FitFunctionBase
-from modules.quantity import Q
+from modules.quantity import Q, is_Q
 import logging
 from functools import lru_cache
 
@@ -25,7 +25,9 @@ def transitionAmplitude(eta, n, m):
     nl = min(n, m)
     ng = max(n, m)
     d = abs(n-m)
-    return exp(-eta2/2) * pow(eta, d) * genlaguerre(nl, d)(eta2) / sqrt( factorialRatio(ng, nl ) ) if n>=0 and m>=0 else 0
+    if n>=0 and m>=0:
+        return exp(-eta2/2) * pow(eta, d) * genlaguerre(nl, d)(eta2) / sqrt( factorialRatio(ng, nl ) ) #if n>=0 and m>=0 else 0
+    return 0
 
 @lru_cache(maxsize=20)
 def laguerreTable(eta, delta_n):
@@ -70,22 +72,33 @@ class MotionalRabiFlopping(FitFunctionBase):
     def update(self,parameters=None):
         A, n, omega, mass, angle, trapFrequency, wavelength, delta_n = self.parameters if parameters is None else parameters #@UnusedVariable
         m = mass * constants.m_p
-        secfreq = trapFrequency*10**6
-        eta = ( (2*pi/(wavelength*10**-9))*cos(angle*pi/180)
-                     * sqrt(constants.hbar/(2*m*2*pi*secfreq)) )
+        if not is_Q(trapFrequency):
+            trapFrequency = Q(trapFrequency, 'MHz')
+        if not is_Q(wavelength):
+            wavelength = Q(wavelength, 'nm')
+        secfreq = trapFrequency.m_as('Hz')
+        eta = (2 * pi / wavelength.m_as('m') * cos(angle * pi / 180)
+               * sqrt(constants.hbar / (2 * m * 2 * pi * secfreq)))
         self.results['eta'] = ResultRecord( name='eta', value=eta )
                
     def updateTables(self, nBar):
-        A, n, omega, mass, angle, trapFrequency, wavelength, delta_n = self.parameters #@UnusedVariable
-        secfreq = trapFrequency.m_as('Hz') * 10**6
+        _, _, _, mass, angle, trapFrequency, wavelength, delta_n = self.parameters #@UnusedVariable
+        if delta_n < 0:
+            delta_n = 0
+            self.parameters[-1] = 0
+        if not is_Q(trapFrequency):
+            trapFrequency = Q(trapFrequency, 'MHz')
+        if not is_Q(wavelength):
+            wavelength = Q(wavelength, 'nm')
+        secfreq = trapFrequency.m_as('Hz')
         m = mass * constants.m_p
-        eta = ( (2*pi/(wavelength*10**-9))*cos(angle*pi/180)
-                     * sqrt(constants.hbar/(2*m*2*pi*secfreq)) )
+        eta = (2 * pi / wavelength.m_as('m') * cos(angle * pi / 180)
+               * sqrt(constants.hbar / (2 * m * 2 * pi * secfreq)))
         self.laguerreTable = laguerreTable(eta, delta_n)
         self.pnTable = probabilityTable(nBar)
             
     def residuals(self, p, y, x, sigma):
-        A, n, omega, mass, angle, trapFrequency, wavelength, delta_n = self.allFitParameters(self.parameters if p is None else p) #@UnusedVariable
+        A, n, omega, _, _, _, _, _ = self.allFitParameters(self.parameters if p is None else p) #@UnusedVariable
         self.updateTables(n)
         if hasattr(x, '__iter__'):
             result = list()
@@ -141,23 +154,35 @@ class TwoModeMotionalRabiFlopping(FitFunctionBase):
     def update(self,parameters=None):
         A, n, omega, mass, angle, trapFrequency, wavelength, delta_n, n_2, trapFrequency_2 = self.parameters if parameters is None else parameters #@UnusedVariable
         m = mass * constants.m_p
+        if not is_Q(trapFrequency):
+            trapFrequency = Q(trapFrequency, 'MHz')
+        if not is_Q(trapFrequency_2):
+            trapFrequency_2 = Q(trapFrequency_2, 'MHz')
+        if not is_Q(wavelength):
+            wavelength = Q(wavelength, 'nm')
         secfreq = trapFrequency*10**6
         secfreq2 = trapFrequency_2*10**6
-        eta = ( (2*pi/(wavelength*10**-9))*cos(angle*pi/180)
+        eta = ( (2*pi/(wavelength.m_as('m')*10**-9))*cos(angle*pi/180)
                      * sqrt(constants.hbar/(2*m*2*pi*secfreq)) )
-        eta2 = ( (2*pi/(wavelength*10**-9))*cos(angle*pi/180)
+        eta2 = ( (2*pi/(wavelength.m_as('m')*10**-9))*cos(angle*pi/180)
                      * sqrt(constants.hbar/(2*m*2*pi*secfreq2)) )
         self.results['eta'] = ResultRecord( name='eta', value=eta )
         self.results['eta_2'] = ResultRecord( name='eta_2', value=eta2 )
                
     def updateTables(self, p):
         A, n, omega, mass, angle, trapFrequency, wavelength, delta_n, n_2, trapFrequency_2 = p #@UnusedVariable
+        if not is_Q(trapFrequency):
+            trapFrequency = Q(trapFrequency, 'MHz')
+        if not is_Q(trapFrequency_2):
+            trapFrequency_2 = Q(trapFrequency_2, 'MHz')
+        if not is_Q(wavelength):
+            wavelength = Q(wavelength, 'nm')
         secfreq = trapFrequency.m_as('Hz') * 10**6
         secfreq2 = trapFrequency_2.m_as('Hz') * 10**6
         m = mass * constants.m_p
-        eta = ( (2*pi/(wavelength*10**-9))*cos(angle*pi/180)
+        eta = ( (2*pi/(wavelength.m_as('m')*10**-9))*cos(angle*pi/180)
                      * sqrt(constants.hbar/(2*m*2*pi*secfreq)) )
-        eta2 = ( (2*pi/(wavelength*10**-9))*cos(angle*pi/180)
+        eta2 = ( (2*pi/(wavelength.m_as('m')*10**-9))*cos(angle*pi/180)
                      * sqrt(constants.hbar/(2*m*2*pi*secfreq2)) )
         self.laguerreTable = laguerreTable(eta, delta_n)
         self.laguerreTable2 = laguerreTable(eta2, 0)

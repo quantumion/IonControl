@@ -6,27 +6,31 @@
 
 import os.path
 import shutil
+import ast
 from functools import partial
 
+import logging
 from PyQt5 import QtCore, QtGui, QtWidgets
 import PyQt5.uic
 from PyQt5.Qsci import QsciScintilla
 import logging
 from datetime import datetime
 from ProjectConfig.Project import getProject
+from expressionFunctions.UserFuncImporter import userFuncLoader
 from modules.PyqtUtility import BlockSignals
 from uiModules.KeyboardFilter import KeyListFilter
 from pulseProgram.PulseProgramSourceEdit import PulseProgramSourceEdit
 from uiModules.MagnitudeSpinBoxDelegate import MagnitudeSpinBoxDelegate
-from expressionFunctions.ExprFuncDecorator import ExprFunUpdate
+from expressionFunctions.ExprFuncDecorator import ExprFunUpdate, ExpressionFunctions, UserExprFuncs, SystemExprFuncs
+from expressionFunctions.UserFunctions import constLookup, localFunctions
 from inspect import isfunction
-import importlib
+import inspect
 from pathlib import Path
 from gui.ExpressionValue import ExpressionValue
 import copy
 from modules.Utility import unique
-from gui.FileTree import ensurePath, genFileTree, onExpandOrCollapse, checkTree, FileTreeMixin, OptionsWindow, OrderedList#, FileTreeModel#, expandAboveChild
-from collections import OrderedDict, UserList, UserDict, ChainMap
+from gui.FileTree import ensurePath, onExpandOrCollapse, FileTreeMixin, OptionsWindow, OrderedList
+from expressionFunctions.UserFuncASTWalker import UserFuncAnalyzer
 
 uipath = os.path.join(os.path.dirname(__file__), '..', 'ui/UserFunctionsEditor.ui')
 EditorWidget, EditorBase = PyQt5.uic.loadUiType(uipath)
@@ -36,9 +40,14 @@ class EvalTableModel(QtCore.QAbstractTableModel):
         super().__init__()
         self.globalDict = globalDict
         self.exprList = [ExpressionValue(None, self.globalDict)]
-        self.dataLookup = {(QtCore.Qt.DisplayRole): lambda index: self.exprList[index.row()].string if index.column() == 0 else self.displayGain(self.exprList[index.row()].value),
+        self.dataLookup = {(QtCore.Qt.DisplayRole): lambda index: self.exprList[index.row()].string if index.column() == 0 else self.displayGain(index.row()),
                            (QtCore.Qt.EditRole): lambda index: self.exprList[index.row()].string if index.column() == 0 else self.displayGain(self.exprList[index.row()].value)}
         self.headerDataLookup = ['Expression', 'Value']
+
+    def displayGain(self, row):
+        if isfunction(self.exprList[row].value.m):
+            return str(self.exprList[row].value.m())
+        return str(self.exprList[row].value)
 
     def rowCount(self, *args):
         return len(self.exprList)
@@ -82,9 +91,12 @@ class EvalTableModel(QtCore.QAbstractTableModel):
     def connectAllExprVals(self):
         """connect all ExpressionValue objects to rest of GUI for updating values when global dependencies change"""
         for i in range(len(self.exprList)):
-            self.exprList[i]._globalDict = self.globalDict
-            self.exprList[i].valueChanged.connect(partial(self.valueChanged, i), QtCore.Qt.UniqueConnection)
-            self.exprList[i].string = copy.copy(self.exprList[i].string)
+            try:
+                self.exprList[i]._globalDict = self.globalDict
+                self.exprList[i].valueChanged.connect(partial(self.valueChanged, i), QtCore.Qt.UniqueConnection)
+                self.exprList[i].string = copy.copy(self.exprList[i].string)
+            except KeyError as e:
+                logging.getLogger(__name__).error("Unable to load test expression in User Function Editor: {} is undefined!".format(e))
 
     def valueChanged(self, ind):
         index = self.createIndex(ind, 1)
@@ -101,12 +113,6 @@ class EvalTableModel(QtCore.QAbstractTableModel):
             if (orientation == QtCore.Qt.Horizontal):
                 return self.headerDataLookup[section]
         return None
-
-    def displayGain(self, val):
-        """check if the object returned is a function for proper display"""
-        if isfunction(val):
-            return str(val())
-        return str(val)
 
     def copy_rows(self, rows, position):
         """creates a copy of elements in table specified by indices in the rows variable and inserts at position+1"""
@@ -148,6 +154,12 @@ class UserCode:
     def localpathname(self):
         return str(self.fullname.relative_to(self.homeDir).as_posix())
 
+class DocTreeItem(QtWidgets.QTreeWidgetItem):
+    def __init__(self, widget, text, path, line):
+        super().__init__(widget, [text])
+        self.path = Path(path) if path is not None else None
+        self.line = line
+
 class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
     """Ui for the user function interface."""
     def __init__(self, experimentUi, globalDict):
@@ -155,6 +167,8 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
         self.config = experimentUi.config
         self.experimentUi = experimentUi
         self.globalDict = globalDict
+        self.docDict = dict()
+        #self.ASTWalker = CodeAnalyzer()
         self.configDirFolder = 'UserFunctions'
         self.configname = 'UserFunctionsEditor'
         self.defaultDir = Path(getProject().configDir + '/' + self.configDirFolder)
@@ -173,6 +187,11 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
         self.tableView.setItemDelegateForColumn(1, self.delegate)
         self.addEvalRow.clicked.connect(self.onAddRow)
         self.removeEvalRow.clicked.connect(self.onRemoveRow)
+
+        #setup documentation list
+        self.getDocs()
+        self.docTreeWidget.setHeaderLabels(['Available Script Functions'])
+        self.docTreeWidget.sortByColumn(0, QtCore.Qt.AscendingOrder)
 
         #initialize default options
         self.optionsWindow = OptionsWindow(self.config, 'UserFunctionsEditorOptions')
@@ -215,6 +234,10 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
         self.script.fullname = self.config.get( self.configname+'.script.fullname', '' )
         self.initLoad()
 
+        #custom context menu for docs
+        self.docTreeWidget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.docTreeWidget.customContextMenuRequested.connect(self.docRightClickMenu)
+
         #connect buttons
         self.actionOpen.triggered.connect(self.onLoad)
         self.actionSave.triggered.connect(self.onSave)
@@ -224,6 +247,25 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
         self.setWindowIcon(QtGui.QIcon( ":/latex/icons/FuncIcon2.png"))
         self.statusLabel.setText("")
         self.tableModel.updateData()
+
+        windowState = self.config.get(self.configname+".guiState")
+        if windowState:
+            self.restoreState(windowState)
+        self.setCorner(QtCore.Qt.BottomRightCorner, QtCore.Qt.RightDockWidgetArea)
+        self.setCorner(QtCore.Qt.TopRightCorner, QtCore.Qt.RightDockWidgetArea)
+        self.setCorner(QtCore.Qt.TopLeftCorner, QtCore.Qt.LeftDockWidgetArea)
+        self.setCorner(QtCore.Qt.BottomLeftCorner, QtCore.Qt.LeftDockWidgetArea)
+
+    def docRightClickMenu(self, pos):
+        """a CustomContextMenu for right click, if code is defined in
+           UserFunctions directory, allows user to jump to source code"""
+        items = self.docTreeWidget.selectedItems()
+        menu = QtWidgets.QMenu()
+        self.openFile = QtWidgets.QAction("Open Source Code", self)
+        self.openFile.triggered.connect(self.gotoCode)
+        if items[0].path != None:
+            menu.addAction(self.openFile)
+        menu.exec_(self.docTreeWidget.mapToGlobal(pos))
 
     def onOpenOptions(self):
         self.optionsWindow.show()
@@ -237,6 +279,73 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
         self.defaultExpandAll = self.optionsWindow.defaultExpand
         self.updateFileComboBoxNames(self.displayFullPathNames)
 
+    def getDocs(self):
+        """Assemble the script function documentation into a dictionary"""
+        currentDocs = {fname: [func, inspect.getdoc(func), func.__code__.co_filename, func.__code__.co_firstlineno] for fname, func in UserExprFuncs.items()}
+        systemDocs = {fname: [func, inspect.getdoc(func), func.__code__.co_filename, func.__code__.co_firstlineno] for fname, func in SystemExprFuncs.items()}
+        baseDocs = {fname: [func, inspect.getdoc(func), None, None] for fname, func in localFunctions.items()}
+        if self.docDict != currentDocs:
+            self.docDict = currentDocs
+            self.docTreeWidget.clear()
+            constItems = DocTreeItem(self.docTreeWidget, 'Constants', None, None)
+            baseFuncItems = DocTreeItem(self.docTreeWidget, 'Builtins', None, None)
+            userFuncItems = DocTreeItem(self.docTreeWidget, 'User Defined Functions', None, None)
+            for name in constLookup:
+                DocTreeItem(constItems, name, None, None)
+            for funcDef, funcAttrs in list(baseDocs.items()):
+                funcDesc = funcAttrs[1]
+                funcDisp = funcDef
+                splitDesc = funcDesc.splitlines()
+                if funcDisp == splitDesc[0]:
+                    if splitDesc[1] == '':
+                        funcDesc = '\n'.join(splitDesc[2:])
+                itemDef = DocTreeItem(baseFuncItems, funcDisp, None, None)
+                DocTreeItem(itemDef, funcDesc, None, None)
+            for funcDef, funcAttrs in list(systemDocs.items()):
+                funcDesc = funcAttrs[1]
+                funcDisp = funcDef+inspect.formatargspec(*inspect.getfullargspec(funcAttrs[0]))
+                itemDef = DocTreeItem(baseFuncItems, funcDisp, *funcAttrs[2::])
+                if funcDesc:
+                    DocTreeItem(itemDef, funcDesc+'\n', *funcAttrs[2::])
+                else:
+                    tempDesc = '{0}({1})'.format(funcDef,', '.join(inspect.getargspec(ExpressionFunctions[funcDef]).args))
+                    DocTreeItem(itemDef, tempDesc, *funcAttrs[2::])
+                self.docTreeWidget.setWordWrap(True)
+            for funcDef, funcAttrs in list(self.docDict.items()):
+                funcDesc = funcAttrs[1]
+                funcDisp = funcDef+inspect.formatargspec(*inspect.getfullargspec(funcAttrs[0]))
+                itemDef = DocTreeItem(userFuncItems, funcDisp, *funcAttrs[2::])
+                if funcDesc:
+                    DocTreeItem(itemDef, funcDesc+'\n', *funcAttrs[2::])
+                else:
+                    tempDesc = '{0}({1})'.format(funcDef,', '.join(inspect.getargspec(ExpressionFunctions[funcDef]).args))
+                    DocTreeItem(itemDef, tempDesc, *funcAttrs[2::])
+                self.docTreeWidget.setWordWrap(True)
+        self.docTreeWidget.invisibleRootItem().sortChildren(0, 0)
+
+    def markLocation(self, line):
+        """mark a specified location"""
+        self.textEdit.textEdit.markerDeleteAll()
+        self.textEdit.textEdit.markerAdd(line, self.textEdit.textEdit.ARROW_MARKER_NUM)
+        self.textEdit.textEdit.setScrollPosition(line-2)
+        self.textEdit.textEdit.setCursorPosition(line, 0)
+
+    def gotoCode(self, *args):
+        docitem = self.docTreeWidget.currentItem()
+        path = docitem.path
+        if path is None:
+            return False
+        lineno = docitem.line
+        if self.defaultDir in path.parents:
+            if self.script.code != str(self.textEdit.toPlainText()):
+                if not self.confirmLoad():
+                    return False
+            self.loadFile(path)
+            self.markLocation(lineno)
+        else:
+            self.statusLabel.setText("Can only load files in UserFunctions directory!")
+            self.statusLabel.setStyleSheet('color: red')
+
     @QtCore.pyqtSlot()
     def onNew(self):
         """New button is clicked. Pop up dialog asking for new name, and create file."""
@@ -245,21 +354,23 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
         if ok:
             shortname = str(shortname)
             shortname = shortname.replace(' ', '_') #Replace spaces with underscores
-            shortname = shortname.split('.')[0] + '.py'#Take only what's before the '.'
-            fullname = self.defaultDir.joinpath(shortname)
-            ensurePath(fullname.parent)
-            if not fullname.exists():
-                try:
-                    with fullname.open('w') as f:
-                        newFileText = '#' + shortname + ' created ' + str(datetime.now()) + '\n\n'
-                        f.write(newFileText)
-                        defaultImportText = 'from expressionFunctions.ExprFuncDecorator import userfunc\n\n'
-                        f.write(defaultImportText)
-                except Exception as e:
-                    message = "Unable to create new file {0}: {1}".format(shortname, e)
-                    logger.error(message)
-                    return
-            self.loadFile(fullname)
+            if shortname[-1] == '/':
+                fullname = self.defaultDir.joinpath(shortname)
+                ensurePath(fullname)
+            else:
+                shortname = shortname.split('.')[0] + '.py'#Take only what's before the '.'
+                fullname = self.defaultDir.joinpath(shortname)
+                ensurePath(fullname.parent)
+                if not fullname.exists():
+                    try:
+                        with fullname.open('w') as f:
+                            newFileText = '#' + shortname + ' created ' + str(datetime.now()) + '\n\n'
+                            f.write(newFileText)
+                    except Exception as e:
+                        message = "Unable to create new file {0}: {1}".format(shortname, e)
+                        logger.error(message)
+                        return
+                self.loadFile(fullname)
             self.populateTree(fullname)
 
     def onComboIndexChange(self, ind):
@@ -271,12 +382,6 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
                 self.filenameComboBox.setCurrentIndex(0)
                 return False
         self.loadFile(self.filenameComboBox.itemData(ind))
-
-    def onLoad(self):
-        """The load button is clicked. Open file prompt for file."""
-        fullname, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Open Script', self.defaultDir, 'Python scripts (*.py *.pyw)')
-        if fullname!="":
-            self.loadFile(fullname)
 
     def loadFile(self, fullname):
         """Load in a file."""
@@ -296,6 +401,7 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
                 w.setItemData(0, self.script.fullname)
                 w.setCurrentIndex(0)
             logger.info('{0} loaded'.format(self.script.fullname))
+            self.statusLabel.setText("")
             self.initcode = copy.copy(self.script.code)
 
     def onRemoveCurrent(self):
@@ -317,39 +423,30 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
                 logger.info('{0} saved'.format(self.script.fullname))
             self.initcode = copy.copy(self.script.code)
         try:
-            importlib.machinery.SourceFileLoader("UserFunctions", str(self.script.fullname)).load_module()
+            userFuncLoader(self.script.fullname)
             self.tableModel.updateData()
-            ExprFunUpdate.dataChanged.emit('__exprfunc__')
-            self.statusLabel.setText("Successfully updated {0}".format(self.script.fullname.name))
+            top = ast.parse(self.script.fullname.read_text())
+            analyzer = UserFuncAnalyzer()
+            analyzer.visit(top)
+            upd_func_list = analyzer.upd_funcs
+            for fname in upd_func_list:
+                ExprFunUpdate.dataChanged.emit(fname)
+            self.statusLabel.setText("Successfully updated {0} at {1}".format(self.script.fullname.name, str(datetime.now())))
             self.statusLabel.setStyleSheet('color: green')
         except SyntaxError as e:
             self.statusLabel.setText("Failed to execute {0}: {1}".format(self.script.fullname.name, e))
             self.statusLabel.setStyleSheet('color: red')
+        self.getDocs()
 
     def saveConfig(self):
         """Save configuration."""
         self.config[self.configname+'.recentFiles'] = self.recentFiles
         self.config[self.configname+'.script.fullname'] = self.script.fullname
         self.config[self.configname+'.isVisible'] = self.isVisible()
-        self.config[self.configname+'.ScriptingUi.pos'] = self.pos()
-        self.config[self.configname+'.ScriptingUi.size'] = self.size()
-        self.config[self.configname+".splitterHorizontal"] = self.splitterHorizontal.saveState()
-        self.config[self.configname+".splitterVertical"] = self.splitterVertical.saveState()
         self.config[self.configname+".evalstr"] = self.tableModel.exprList
+        self.config[self.configname+'.guiState'] = self.saveState()
 
     def show(self):
-        pos = self.config.get(self.configname+'.ScriptingUi.pos')
-        size = self.config.get(self.configname+'.ScriptingUi.size')
-        splitterHorizontalState = self.config.get(self.configname+".splitterHorizontal")
-        splitterVerticalState = self.config.get(self.configname+".splitterVertical")
-        if pos:
-            self.move(pos)
-        if size:
-            self.resize(size)
-        if splitterHorizontalState:
-            self.splitterHorizontal.restoreState(splitterHorizontalState)
-        if splitterVerticalState:
-            self.splitterVertical.restoreState(splitterVerticalState)
         QtWidgets.QDialog.show(self)
 
     def onAddRow(self):
@@ -401,3 +498,4 @@ class UserFunctionsEditor(FileTreeMixin, EditorWidget, EditorBase):
     def onClose(self):
         self.saveConfig()
         self.hide()
+

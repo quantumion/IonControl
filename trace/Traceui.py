@@ -6,9 +6,11 @@
 
 import logging
 import os.path
+import numpy
 
 from modules.AttributeComparisonEquality import AttributeComparisonEquality
 from trace.BlockAutoRange import BlockAutoRangeList
+from trace.PlottedStructure import PlottedStructure
 from trace.TraceCollection import TraceCollection
 from trace import pens
 
@@ -27,10 +29,16 @@ from functools import partial
 from dateutil.tz import tzlocal
 from modules.doProfile import doprofile
 import subprocess
+from pathlib import Path
+import ctypes
+from modules.InkscapeConversion import getPdfMetaData, getSvgMetaData
+from gui.TraceFilterEditor import TraceFilterTableModel, TraceFilterEditor
 from functools import reduce
 
 uipath = os.path.join(os.path.dirname(__file__), '..', 'ui/Traceui.ui')
 TraceuiForm, TraceuiBase = PyQt5.uic.loadUiType(uipath)
+
+traceFocus = None
 
 class Settings(AttributeComparisonEquality):
     """
@@ -59,7 +67,7 @@ class Settings(AttributeComparisonEquality):
         self.__dict__.setdefault('collapseLastTrace', False)
         self.__dict__.setdefault('expandNew', True)
 
-class Traceui(TraceuiForm, TraceuiBase):
+class TraceuiMixin:
     """
     Class for the trace interface.
     Attributes:
@@ -69,9 +77,8 @@ class Traceui(TraceuiForm, TraceuiBase):
         graphicsViewDict (dict): dict of available plot windows
     """
     openMeasurementLog = QtCore.pyqtSignal(list) #list of strings with trace creation dates
+    exitSignal = QtCore.pyqtSignal()
     def __init__(self, penicons, config, experimentName, graphicsViewDict, parent=None, lastDir=None, hasMeasurementLog=False, highlightUnsaved=False, preferences=None):
-        TraceuiBase.__init__(self, parent)
-        TraceuiForm.__init__(self)
         self.penicons = penicons
         self.config = config
         self.configname = "Traceui."+experimentName
@@ -80,10 +87,10 @@ class Traceui(TraceuiForm, TraceuiBase):
         self.hasMeasurementLog = hasMeasurementLog
         self.highlightUnsaved = highlightUnsaved
         self.preferences = preferences #these are really print preferences used to find gnuplot path
+        self.classIndicator = 'trace'
 
     def setupUi(self, MainWindow):
         """Setup the UI. Create the model and the view. Connect all the buttons."""
-        TraceuiForm.setupUi(self, MainWindow)
         self.model = TraceModel([], self.penicons, self.graphicsViewDict, highlightUnsaved=self.highlightUnsaved)
         self.traceView.setModel(self.model)
         self.delegate = TraceComboDelegate(self.penicons)
@@ -111,43 +118,46 @@ class Traceui(TraceuiForm, TraceuiBase):
         self.saveButtonMenu.addAction(saveAsTextAction)
         self.saveButtonMenu.addAction(saveAsHdf5Action)
 
-        self.showOnlyLastButton.clicked.connect(self.onShowOnlyLast)
         self.selectAllButton.clicked.connect(self.traceView.selectAll)
         self.collapseAllButton.clicked.connect(self.traceView.collapseAll)
         self.expandAllButton.clicked.connect(self.traceView.expandAll)
         self.traceView.selectionModel().selectionChanged.connect(self.onActiveTraceChanged)
         self.measurementLogButton.clicked.connect(self.onMeasurementLog)
 
-        self.setContextMenuPolicy( QtCore.Qt.ActionsContextMenu )
+        self.traceView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.traceView.customContextMenuRequested.connect(self.rightClickMenu)
 
-        self.unplotSettingsAction = QtWidgets.QAction( "Unplot last trace set", self )
-        self.unplotSettingsAction.setCheckable(True)
-        self.unplotSettingsAction.setChecked( self.settings.unplotLastTrace)
-        self.unplotSettingsAction.triggered.connect( self.onUnplotSetting )
-        self.addAction( self.unplotSettingsAction )
-
-        self.collapseLastTraceAction = QtWidgets.QAction( "Collapse last trace set", self )
-        self.collapseLastTraceAction.setCheckable(True)
-        self.collapseLastTraceAction.setChecked( self.settings.collapseLastTrace)
-        self.collapseLastTraceAction.triggered.connect(self.onCollapseLastTrace)
-        self.addAction( self.collapseLastTraceAction )
-
-        self.expandNewAction = QtWidgets.QAction( "Expand new traces", self )
-        self.expandNewAction.setCheckable(True)
-        self.expandNewAction.setChecked( self.settings.expandNew)
-        self.expandNewAction.triggered.connect(self.onExpandNew)
-        self.addAction( self.expandNewAction )
         self.measurementLogButton.setVisible(self.hasMeasurementLog)
 
         self.plotWithMatplotlib = QtWidgets.QAction("Plot with matplotlib", self)
         self.plotWithMatplotlib.triggered.connect(self.onPlotWithMatplotlib)
-        self.addAction(self.plotWithMatplotlib)
 
         self.plotWithGnuplot = QtWidgets.QAction("Plot with gnuplot", self)
         self.plotWithGnuplot.triggered.connect(self.onPlotWithGnuplot)
-        self.addAction(self.plotWithGnuplot)
 
-    @doprofile
+        self.openDirectory = QtWidgets.QAction("Open containing directory", self)
+        self.openDirectory.triggered.connect(self.openContainingDirectory)
+
+        self.copyFilenameAction = QtWidgets.QAction("Copy filename", self)
+        self.copyFilenameAction.triggered.connect(self.onCopyFilename)
+
+        self.filterData = QtWidgets.QAction("Filter editor", self)
+        self.filterData.triggered.connect(self.onEditFilterData)
+
+        self.filterROI = QtWidgets.QAction("Select ROI", self)
+        self.filterROI.triggered.connect(self.onFilterROI)
+
+        self.removeFilterAction = QtWidgets.QAction("Remove filter", self)
+        self.removeFilterAction.triggered.connect(self.removeFilter)
+
+        self.filtersAction = QtWidgets.QAction("Filter fitted data", self)
+        filtersMenu = QtWidgets.QMenu(self)
+        self.filtersAction.setMenu(filtersMenu)
+        filtersMenu.addAction(self.filterData)
+        filtersMenu.addAction(self.filterROI)
+        filtersMenu.addAction(self.removeFilterAction)
+        #self.plotParamTable.setupUi()
+
     def onDelete(self, _):
         with BlockAutoRangeList([gv['widget'] for gv in self.graphicsViewDict.values()]):
             self.traceView.onDelete()
@@ -241,7 +251,7 @@ class Traceui(TraceuiForm, TraceuiBase):
                 else:
                     ylabel = ''
 
-                # some custom line types since gnuplot standards annoy me, started at a higher index so
+                # some custom line types started at a higher index so
                 # as not to conflict with lower index line styles if people prefer them
                 # line styles exceed color list by 1 so point types and colors will go through every combination
                 proc.stdin.write(b" set style line 11 lt 1 pt 5 lw 2 ps 1.25\n")  # blue
@@ -267,13 +277,67 @@ class Traceui(TraceuiForm, TraceuiBase):
                 proc.stdin.flush()
 
     def onPlotWithMatplotlib(self):
+        from trace.MatplotlibInterface import MatplotWindow
+        mpw = MatplotWindow(config=self.config, exitSig=self.exitSignal)
+        mpw.show()
         selectedNodes = self.traceView.selectedNodes()
         uniqueSelectedNodes = [node for node in selectedNodes if node.parent not in selectedNodes]
         for node in uniqueSelectedNodes:
             dataNodes = self.model.getDataNodes(node)
             for dataNode in dataNodes:
                 plottedTrace = dataNode.content
- 
+                mpw.plot(plottedTrace)
+
+    def onEditFilterData(self):
+        """open up the trace table editor"""
+        selectedNodes = self.traceView.selectedNodes()
+        uniqueSelectedNodes = [node for node in selectedNodes if node.parent not in selectedNodes]
+        self.tableEditor = TraceFilterEditor()
+        self.tableEditor.setupUi(uniqueSelectedNodes, self.model)
+
+    def onFilterROI(self):
+        selectedNodes = self.traceView.selectedNodes()
+        uniqueSelectedNodesInt = [node for node in selectedNodes if node.parent not in selectedNodes and node.parent]
+        uniqueSelectedNodes = []
+        for node in uniqueSelectedNodesInt:
+            if node.nodeType == 0:
+                for child in node.children:
+                    uniqueSelectedNodes.append(child)
+            else:
+                uniqueSelectedNodes.append(node)
+        wname = uniqueSelectedNodes[0].content.windowName
+        self.graphicsViewDict[wname]['widget'].onFilterROI()
+        self.graphicsViewDict[wname]['widget'].ROIBoundsSignal.connect(partial(self.filterBounds, wname, uniqueSelectedNodes))
+
+    def filterBounds(self, wname, nodes, xbounds, ybounds, filtDisable=True):
+        self.graphicsViewDict[wname]['widget'].ROIBoundsSignal.disconnect()
+        if xbounds:
+            for node in nodes:
+                if node.content.filt is None or filtDisable is False:
+                    node.content.filt = numpy.array([*map(lambda n: 1*(not n if filtDisable else n),
+                                                          map(lambda q: xbounds[0] < q[0] < xbounds[1] and
+                                                                        ybounds[0] < q[1] < ybounds[1],
+                                                              zip(node.content.x, node.content.y)))])
+                else:
+                    node.content.filt = numpy.array([*map(lambda n: 1*(not filtDisable if n[0] else n[1]),
+                                                          zip([*map(lambda q: xbounds[0] < q[0] < xbounds[1] and
+                                                                        ybounds[0] < q[1] < ybounds[1],
+                                                              zip(node.content.x, node.content.y))], node.content.filt))])
+                node.content.plot(node.content.curvePen)
+
+    def removeFilter(self):
+        selectedNodes = self.traceView.selectedNodes()
+        for node in selectedNodes:
+            if node.parent not in selectedNodes and node.parent:
+                if node.nodeType == 0:
+                    for child in node.children:
+                        if child.content.filt is not None:
+                            child.content.filt = [1]*len(child.content.filt)
+                            child.content.plot(child.content.curvePen)
+                elif node.content.filt is not None:
+                    node.content.filt = [1]*len(node.content.filt)
+                    node.content.plot(node.content.curvePen)
+
     def onApplyStyle(self):
         """Execute when apply style button is clicked. Changed style of selected traces."""
         selectedNodes = self.traceView.selectedNodes()
@@ -284,18 +348,31 @@ class Traceui(TraceuiForm, TraceuiBase):
                 trace = dataNode.content
                 trace.plot(-2, self.settings.plotstyle)
 
-    def onSave(self, fileType=None, saveCopy=False):
+    def onCopyFilename(self):
+        selectedTopNodes = self.traceView.selectedTopNodes()
+        filenames = list()
+        for node in selectedTopNodes:
+            dataNode = self.model.getFirstDataNode(node)
+            if dataNode:
+                traceCollection = dataNode.content.traceCollection
+                filenames.append(traceCollection.filename)
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(" ".join(filenames))
+
+    def onSave(self, fileType=None, saveCopy=False, returnTraceNodeNames=False):
         """Save button is clicked. Save selected traces. If a trace has never been saved before, update model."""
         leftCol = 0
         rightCol = self.model.numColumns-1
         selectedTopNodes = self.traceView.selectedTopNodes()
         filename = ''
+        parentids = []
         for node in selectedTopNodes:
             dataNode=self.model.getFirstDataNode(node)
             if dataNode:
                 traceCollection = dataNode.content.traceCollection
                 alreadySaved = traceCollection.saved
-                filename = traceCollection.save(fileType,saveCopy)
+                filename = traceCollection.save(fileType, saveCopy)
+                parentids.append(dataNode.parent.id)
                 if not alreadySaved:
                     self.model.onSaveUnsavedTrace(dataNode)
                     self.model.traceModelDataChanged.emit(str(traceCollection.traceCreation), 'filename', traceCollection.filename)
@@ -307,7 +384,13 @@ class Traceui(TraceuiForm, TraceuiBase):
                         bottomRightInd = self.model.indexFromNode(dataNode.parent.children[-1], rightCol)
                     self.model.dataChanged.emit(topLeftInd, bottomRightInd)
                     self.model.emitParentDataChanged(dataNode, leftCol, rightCol)
+        if returnTraceNodeNames:
+            return filename, parentids
         return filename
+
+    def updateFocus(self):
+        global traceFocus
+        traceFocus = self.classIndicator
 
     def onActiveTraceChanged(self):
         """Display trace creation/finalized date/time when a trace is selected"""
@@ -331,6 +414,12 @@ class Traceui(TraceuiForm, TraceuiBase):
             else:
                 self.finalizedDateLabel.setText('')
                 self.finalizedTimeLabel.setText('')
+            # take care of properties
+            plotted = dataNode.content
+            try:
+                self.plotParamTable.setParameters(plotted.parameters())
+            except:
+                pass
         else:
                 self.createdDateLabel.setText('')
                 self.createdTimeLabel.setText('')
@@ -410,6 +499,7 @@ class Traceui(TraceuiForm, TraceuiBase):
         
     def onViewClicked(self, index):
         """If one of the editable columns is clicked, begin to edit it."""
+        self.updateFocus()
         if self.model.isDataNode(index):
             if index.column() in [self.model.column.pen, self.model.column.window, self.model.column.comment]:
                 self.traceView.edit(index)
@@ -421,9 +511,32 @@ class Traceui(TraceuiForm, TraceuiBase):
         fnames, _ = QtWidgets.QFileDialog.getOpenFileNames(self, 'Open files', self.settings.lastDir)
         with BlockAutoRangeList([gv['widget'] for gv in self.graphicsViewDict.values()]):
             for fname in fnames:
-                self.openFile(fname)
+                if Path(fname).suffix == '.pdf':
+                    pdfnames = getPdfMetaData(fname)
+                    if pdfnames:
+                        for pdfname in pdfnames:
+                            self.openFile(pdfname)
+                elif Path(fname).suffix == '.svg':
+                    svgnames = getSvgMetaData(fname)
+                    if svgnames:
+                        for svgname in svgnames:
+                            self.openFile(svgname)
+                elif Path(fname).suffix == '.py':
+                    code = Path(fname).read_text()
+                    files = code.split('"""\n')[1].split('\n')[:-1]
+                    shortenedCode = code.split('\n')[2+len(files):]
+                    plottedTraces = [self.openFile(f)[0] for f in files]
+                    from trace.MatplotlibInterface import MatplotWindow
+                    mpw = MatplotWindow(config=self.config, exitSig=self.exitSignal)
+                    mpw.show()
+                    for pt in plottedTraces:
+                        mpw.plot(pt)
+                    mpw.textEdit.setPlainText('\n'.join(shortenedCode))
+                    mpw.replot()
+                else:
+                    self.openFile(fname)
 
-    def openFile(self, filename):
+    def openFile(self, filename, defaultpen=-1):
         filename = str(filename)
         traceCollection = TraceCollection()
         traceCollection.filename = filename
@@ -438,20 +551,28 @@ class Traceui(TraceuiForm, TraceuiBase):
             dataNode=self.model.getFirstDataNode(node)
             existingTraceCollection=dataNode.content.traceCollection
             if existingTraceCollection.fileleaf==traceCollection.fileleaf and str(existingTraceCollection.traceCreation)==str(traceCollection.traceCreation):
-                return #If the filename and creation dates are the same, you're trying to open an existing trace.
-        plottedTraceList = list()
-        category = None if len(traceCollection.tracePlottingList)==1 else self.getUniqueCategory(filename)
-        for plotting in traceCollection.tracePlottingList:
-            windowName = plotting.windowName if plotting.windowName in self.graphicsViewDict else list(self.graphicsViewDict.keys())[0]
-            name = plotting.name
-            plottedTrace = PlottedTrace(traceCollection, self.graphicsViewDict[windowName]['view'], pens.penList, -1, tracePlotting=plotting, windowName=windowName, name=name)
-            plottedTrace.category = category
-            plottedTraceList.append(plottedTrace)
-            self.addTrace(plottedTrace, -1)
+                return existingTraceCollection.plottingList #If the filename and creation dates are the same, you're trying to open an existing trace.
+        category = None if len(traceCollection.plottingList)==1 else self.getUniqueCategory(filename)
+        for plotted in traceCollection.plottingList:
+            windowName = plotted.windowName if plotted.windowName in self.graphicsViewDict else list(self.graphicsViewDict.keys())[0]
+            name = plotted.name
+            plotted.setup(traceCollection, self.graphicsViewDict[windowName], pens.penList, -1,
+                          windowName=windowName, name=name)
+            plotted.category = category
+            self.addTrace(plotted, defaultpen)
         if self.expandNew:
-            self.expand(plottedTraceList[0])
+            self.expand(traceCollection.plottingList[0])
         self.resizeColumnsToContents()
-        return plottedTraceList
+        return traceCollection.plottingList
+
+    def openContainingDirectory(self):
+        """Opens the parent directory of a file, selecting the file if possible."""
+        selectedNodes = self.traceView.selectedNodes()
+        uniqueSelectedNodes = [node for node in selectedNodes if node.parent not in selectedNodes]
+        dataNodes = self.model.getDataNodes(uniqueSelectedNodes[0])
+        path = dataNodes[0].content.traceCollection.filename.replace('\\', '/')
+        upath = str(Path(path))
+        subprocess.Popen(r'explorer /select,"{}"'.format(upath))
 
     def saveConfig(self):
         """Execute when the UI is closed. Save the settings to the config file."""
@@ -468,7 +589,61 @@ class Traceui(TraceuiForm, TraceuiBase):
     def getUniqueCategory(self, filename):
         return self.model.getUniqueCategory(filename)
 
-# if __name__ == '__main__':
+class Traceui(TraceuiMixin, TraceuiForm, TraceuiBase):
+    def __init__(self, penicons, config, experimentName, graphicsViewDict, parent=None, lastDir=None, hasMeasurementLog=False, highlightUnsaved=False, preferences=None):
+        TraceuiBase.__init__(self, parent)
+        TraceuiForm.__init__(self)
+        super().__init__(penicons, config, experimentName, graphicsViewDict, parent, lastDir, hasMeasurementLog, highlightUnsaved, preferences)
+
+    def setupUi(self, MainWindow):
+        TraceuiForm.setupUi(self, MainWindow)
+        super().setupUi(MainWindow)
+        self.showOnlyLastButton.clicked.connect(self.onShowOnlyLast)
+        self.unplotSettingsAction = QtWidgets.QAction( "Unplot last trace set", self )
+        self.unplotSettingsAction.setCheckable(True)
+        self.unplotSettingsAction.setChecked( self.settings.unplotLastTrace)
+        self.unplotSettingsAction.triggered.connect( self.onUnplotSetting )
+        self.traceView.addAction( self.unplotSettingsAction )
+
+        self.collapseLastTraceAction = QtWidgets.QAction( "Collapse last trace set", self )
+        self.collapseLastTraceAction.setCheckable(True)
+        self.collapseLastTraceAction.setChecked( self.settings.collapseLastTrace)
+        self.collapseLastTraceAction.triggered.connect(self.onCollapseLastTrace)
+        self.traceView.addAction( self.collapseLastTraceAction )
+
+        self.expandNewAction = QtWidgets.QAction( "Expand new traces", self )
+        self.expandNewAction.setCheckable(True)
+        self.expandNewAction.setChecked( self.settings.expandNew)
+        self.expandNewAction.triggered.connect(self.onExpandNew)
+        self.traceView.addAction( self.expandNewAction )
+        self.traceView.addAction(self.plotWithMatplotlib)
+        self.traceView.addAction(self.plotWithGnuplot)
+        self.traceView.addAction(self.openDirectory)
+        self.traceView.addAction(self.filtersAction)
+        self.traceView.addAction(self.copyFilenameAction)
+
+    def rightClickMenu(self, pos):
+        """a CustomContextMenu for right click"""
+        items = self.traceView.selectedNodes()
+        menu = QtWidgets.QMenu()
+        if not items:
+            menu.addAction(self.unplotSettingsAction)
+            menu.addAction(self.collapseLastTraceAction)
+            menu.addAction(self.expandNewAction)
+        else:
+            menu.addAction(self.unplotSettingsAction)
+            menu.addAction(self.collapseLastTraceAction)
+            menu.addAction(self.expandNewAction)
+            menu.addAction(self.plotWithMatplotlib)
+            menu.addAction(self.plotWithGnuplot)
+            menu.addAction(self.openDirectory)
+            menu.addAction(self.filtersAction)
+            menu.addAction(self.copyFilenameAction)
+        menu.exec_(self.traceView.mapToGlobal(pos))
+
+
+
+        # if __name__ == '__main__':
 #     import sys
 #     import pyqtgraph as pg
 #     from uiModules.CoordinatePlotWidget import CoordinatePlotWidget

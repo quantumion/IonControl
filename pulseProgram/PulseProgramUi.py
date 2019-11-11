@@ -23,7 +23,7 @@ from pulseProgram.VariableTableModel import VariableTableModel
 from pulser.Encodings import EncodingDict
 from uiModules.RotatedHeaderView import RotatedHeaderView
 from modules.enum import enum
-from pppCompiler.pppCompiler import pppCompiler
+from pppCompiler.astCompiler import pppCompiler
 from pppCompiler.CompileException import CompileException
 from pppCompiler.Symbol import SymbolTable
 from modules.PyqtUtility import BlockSignals, updateComboBoxItems
@@ -131,11 +131,13 @@ class PulseProgramUi(PulseProgramWidget, PulseProgramBase):
             builtinWords.append(key)
 
     SourceMode = enum('pp', 'ppp') 
-    def __init__(self, config, parameterdict, channelNameData):
+    def __init__(self, config, parameterdict, channelNameData, pulser=None):
         PulseProgramWidget.__init__(self)
         PulseProgramBase.__init__(self)
         self.dependencyGraph = DiGraph()
-        self.pulseProgram = PulseProgram.PulseProgram()
+        self.pulser = pulser
+        self.numDDSChannels = len(self.pulser.pulserConfiguration().ddsChannels) if self.pulser.pulserConfiguration() else 8
+        self.pulseProgram = PulseProgram.PulseProgram(ddsnum=self.numDDSChannels)
         self.sourceCodeEdits = dict()
         self.pppCodeEdits = dict()
         self.config = config
@@ -163,8 +165,11 @@ class PulseProgramUi(PulseProgramWidget, PulseProgramBase):
         super(PulseProgramUi, self).setupUi(parent)
         self.setCentralWidget(None) #No central widget
         self.experimentname = experimentname
-        self.configname = 'PulseProgramUi.'+self.experimentname
-        self.contextDict = self.config.get( self.configname+'.contextdict', dict() )
+        self.configname = 'PulseProgramUi.' + self.experimentname
+        self.contextConfigname = self.configname + '.contextdict'
+        self.contextDict = dict(self.config.items_startswith(self.contextConfigname + "."))
+        if not self.contextDict:
+            self.contextDict = self.config.get(self.contextConfigname, dict())
         self.populateDependencyGraph()
         for context in self.contextDict.values():    # set the global dict as this field does not survive pickling
             context.setGlobaldict(self.globaldict)
@@ -556,6 +561,7 @@ class PulseProgramUi(PulseProgramWidget, PulseProgramBase):
         try:
             compiler = pppCompiler()
             ppCode = compiler.compileString( self.pppSource )
+            #self.pppReverseLineLookup = dict()#compiler.reverseLineLookup
             self.pppReverseLineLookup = compiler.reverseLineLookup
             self.pppCompileException = None
             with open(savefilename, "w") as f:
@@ -667,7 +673,7 @@ class PulseProgramUi(PulseProgramWidget, PulseProgramBase):
         self.configParams.lastContextName = str(self.contextComboBox.currentText())
         self.config[self.configname+".state"] = self.saveState() #Arrangement of dock widgets
         self.config[self.configname] = self.configParams
-        self.config[self.configname+'.contextdict'] = self.contextDict 
+        self.config.set_string_dict(self.contextConfigname, self.contextDict)
         self.config[self.configname+'.currentContext'] = self.currentContext
         self.config[self.configname+'.docSplitter'] = self.docSplitter.saveState()
         self.variableTableModel.saveConfig()
@@ -873,7 +879,7 @@ class PulseProgramSetUi(QtWidgets.QDialog):
     class Parameters:
         pass
     
-    def __init__(self, config, channelNameData):
+    def __init__(self, config, channelNameData, pulser=None):
         super(PulseProgramSetUi, self).__init__()
         self.config = config
         self.configname = 'PulseProgramSetUi'
@@ -881,18 +887,19 @@ class PulseProgramSetUi(QtWidgets.QDialog):
         self.lastExperimentFile = dict()     # ExperimentName -> last pp file used for this experiment
         self.isShown = False
         self.channelNameData = channelNameData
+        self.pulser = pulser
     
     def setupUi(self, parent):
         self.horizontalLayout = QtWidgets.QHBoxLayout(parent)
         self.tabWidget = QtWidgets.QTabWidget(parent)
         self.horizontalLayout.addWidget(self.tabWidget)
         self.setWindowTitle('Pulse Program')
-        self.setWindowFlags(QtCore.Qt.WindowMinMaxButtonsHint)
+        self.setWindowFlags(QtCore.Qt.WindowCloseButtonHint | QtCore.Qt.WindowMinMaxButtonsHint)
         self.setWindowIcon(QtGui.QIcon(":/petersIcons/icons/pulser1.png"))
 
     def addExperiment(self, experiment, globalDict=dict(), globalVariablesChanged=None):
         if not experiment in self.pulseProgramSet:
-            programUi = PulseProgramUi(self.config, globalDict, self.channelNameData)
+            programUi = PulseProgramUi(self.config, globalDict, self.channelNameData, pulser=self.pulser)
             programUi.globalVariablesChanged = globalVariablesChanged
             programUi.setupUi(experiment, programUi)
             programUi.myindex = self.tabWidget.addTab(programUi, experiment)

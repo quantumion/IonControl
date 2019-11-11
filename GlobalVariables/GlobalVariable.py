@@ -4,13 +4,16 @@
 # in the file "license.txt" in the top-level IonControl directory
 # *****************************************************************
 from PyQt5 import QtCore
+
+from GlobalVariables.GlobalOutputChannel import GlobalOutputChannel
 from externalParameter.persistence import DBPersist
 from externalParameter.decimation import StaticDecimation
 from modules.quantity import is_Q, Q
 from collections import deque, MutableMapping
-import xml.etree.ElementTree as ElementTree
+import lxml.etree as ElementTree
 from modules.MagnitudeParser import parse
-from expressionFunctions.ExprFuncDecorator import ExprFunUpdate
+from expressionFunctions.ExprFuncDecorator import ExprFunUpdate, NamedTraceUpdate, SystemExprFuncs, \
+                                                  UserExprFuncs, NamedTraceDict
 import time
 
 class GlobalVariablesException(Exception):
@@ -126,6 +129,13 @@ class GlobalVariablesLookup(MutableMapping):
         return self.globalDict.__iter__()
 
     def valueChanged(self, key):
-        if key == '__exprfunc__':
+        if key in UserExprFuncs or key in SystemExprFuncs:
             return ExprFunUpdate.dataChanged
+        elif key == '__namedtrace__' or '_NT_' in key or key in NamedTraceDict:
+            return NamedTraceUpdate.dataChanged
         return self.globalDict[key].valueChanged
+
+    def outputChannels(self):
+        self._outputChannels = {key: GlobalOutputChannel(self, key) for key in self.globalDict.keys()}
+        return self._outputChannels
+

@@ -3,37 +3,51 @@
 # This Software is released under the GPL license detailed
 # in the file "license.txt" in the top-level IonControl directory
 # *****************************************************************
-from . import logging
+import os
+
+import logging
 import sys
 
-from PyQt5 import QtCore, QtGui
-import PyQt5.uic
+from notify.notification import NotificationCenter
+from notify.notification_ui import NotificationUi
 
-from .mylogging.ExceptionLogButton import ExceptionLogButton
-from .mylogging import LoggingSetup  #@UnusedImport
-from .modules import DataDirectory
-from .persist import configshelve
-from .uiModules import MagnitudeParameter #@UnusedImport
+isPy3 = sys.version_info[0] > 2
+if isPy3:
+    from PyQt5 import QtCore, QtGui, QtWidgets
+    import PyQt5.uic
+else:
+    from PyQt4 import QtCore, QtGui, QtWidgets
+    import PyQt4.uic
+
+from mylogging.ExceptionLogButton import ExceptionLogButton
+from mylogging import LoggingSetup  #@UnusedImport
+from modules import DataDirectory
+from persist import configshelve
+from uiModules import MagnitudeParameter #@UnusedImport
 from pyqtgraph.exporters.ImageExporter import ImageExporter
 
-from .trace import Traceui
-from .trace import pens
+from trace import Traceui
+from trace import pens
 
 from pyqtgraph.dockarea import DockArea, Dock
-from .uiModules.DateTimePlotWidget import DateTimePlotWidget
-from .externalParameter.InstrumentLogging import LoggingInstruments 
-from .externalParameter.InstrumentLoggingSelection import InstrumentLoggingSelection 
-from .externalParameter.InstrumentLoggingHandler import InstrumentLoggingHandler
-from .fit.FitUi import FitUi
-from .externalParameter.InstrumentLoggerQueryUi import InstrumentLoggerQueryUi
-from .externalParameter.InstrumentLoggingDisplay import InstrumentLoggingDisplay
-from .modules.SequenceDict import SequenceDict
-from .mylogging.LoggerLevelsUi import LoggerLevelsUi
-from _functools import partial
-from .gui.Preferences import PreferencesUi
-from .modules.SceneToPrint import SceneToPrint
-from .ProjectConfig.Project import Project, ProjectInfoUi
+from uiModules.DateTimePlotWidget import DateTimePlotWidget
+from externalParameter.InstrumentLogging import LoggingInstruments
+from externalParameter.InstrumentLoggingSelection import InstrumentLoggingSelection
+from externalParameter.InstrumentLoggingHandler import InstrumentLoggingHandler
+from fit.FitUi import FitUi
+from externalParameter.InstrumentLoggerQueryUi import InstrumentLoggerQueryUi
+from externalParameter.InstrumentLoggingDisplay import InstrumentLoggingDisplay
+from modules.SequenceDict import SequenceDict
+from mylogging.LoggerLevelsUi import LoggerLevelsUi
+from functools import partial
+from gui.Preferences import PreferencesUi
+from modules.SceneToPrint import SceneToPrint
+from ProjectConfig.Project import Project, ProjectInfoUi
 import ctypes
+from persist import Timeseries
+
+_ = Timeseries.TimeseriesPersist  # We want this imported
+
 setID = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
 
 WidgetContainerForm, WidgetContainerBase = PyQt5.uic.loadUiType(r'ui\InstrumentLoggingUi.ui')
@@ -78,7 +92,19 @@ class InstrumentLoggingUi(WidgetContainerBase, WidgetContainerForm):
 
         logger = logging.getLogger()        
         self.toolBar.addWidget(ExceptionLogButton())
-            
+
+        # Notification center
+        self.notificationCenter = NotificationCenter(subscriptions=self.config.get("NotificationSubscriptions"))
+        self.notificationCenterUi = NotificationUi(self.notificationCenter)
+        self.notificationCenterUi.setupUi(self.notificationCenterUi)
+        self.notificationCenterDock = QtWidgets.QDockWidget("Notifications")
+        self.notificationCenterDock.setObjectName("Notifications")
+        self.notificationCenterDock.setWidget(self.notificationCenterUi)
+        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.notificationCenterDock)
+        self.notificationPeriodicTimer = QtCore.QTimer()
+        self.notificationPeriodicTimer.timeout.connect(self.notificationCenter.periodicWork)
+        self.notificationPeriodicTimer.start(180000)  # send rate limited pending messages every 3 minutes
+
         # Setup Console Dockwidget
         self.levelComboBox.addItems(self.levelNameList)
         self.levelComboBox.currentIndexChanged[int].connect( self.setLoggingLevel )            
@@ -119,7 +145,8 @@ class InstrumentLoggingUi(WidgetContainerBase, WidgetContainerForm):
         self.fitWidget.setupUi(self.fitWidget)
         self.fitWidgetDock = self.setupAsDockWidget(self.fitWidget, "Fit", QtCore.Qt.LeftDockWidgetArea, stackBelow=traceuiDock)
 
-        self.instrumentLoggingHandler = InstrumentLoggingHandler(self.traceui, self.plotDict, self.config, 'externalInput')
+        self.instrumentLoggingHandler = InstrumentLoggingHandler(self.traceui, self.plotDict, self.config,
+                                                                 'externalInput', notifications=self.notificationCenter)
 
         self.ExternalParametersSelectionUi = InstrumentLoggingSelection(self.config, classdict=LoggingInstruments, plotNames=list(self.plotDict.keys()),
                                                                         instrumentLoggingHandler=self.instrumentLoggingHandler )
@@ -171,6 +198,7 @@ class InstrumentLoggingUi(WidgetContainerBase, WidgetContainerForm):
         self.initMenu()
         self.actionProject.triggered.connect( self.onProjectSelection)
         self.actionExit.triggered.connect(self.onClose)
+        self.actionSave.triggered.connect(self.onSave)
 
     def onProjectSelection(self):
         ui = ProjectInfoUi(self.project)
@@ -303,6 +331,7 @@ class InstrumentLoggingUi(WidgetContainerBase, WidgetContainerForm):
         self.instrumentLoggingHandler.saveConfig()
         self.instrumentLoggingQueryUi.saveConfig()
         self.preferencesUi.saveConfig()
+        self.config["NotificationSubscriptions"] = self.notificationCenter.subscriptions
 
     def onPrint(self, target):
         printer = QtPrintSupport.QPrinter(mode=QtPrintSupport.QPrinter.ScreenResolution)
@@ -368,7 +397,12 @@ if __name__ == "__main__":
     project = Project()
     logger = logging.getLogger("")
     setID('TrappedIons.InstrumentLogging') #Makes the icon in the Windows taskbar match the icon set in Qt Designer
-    with configshelve.configshelve(project.guiConfigFile) as config:
+
+    overrideConfigFile = project.projectConfig.get('configurationFile')
+    overrideFileType = {'.yml': 'yaml', '.yaml': 'yaml', '.db': 'sqlite'}.get(os.path.splitext(overrideConfigFile)[1], 'sqlite') if overrideConfigFile else None
+    loadFromDate = project.projectConfig.get('configurationFile')
+    with configshelve.configshelve(project.dbConnection, loadFromDate=project.projectConfig.get('loadFromDateTime', None),
+                                   filename=overrideConfigFile, filetype=overrideFileType) as config:
         with InstrumentLoggingUi(project, config) as ui:
             ui.setupUi(ui)
             LoggingSetup.qtHandler.textWritten.connect(ui.onMessageWrite)

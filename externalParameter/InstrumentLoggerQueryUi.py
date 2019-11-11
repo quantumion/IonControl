@@ -19,7 +19,7 @@ from modules import WeakMethod
 import weakref
 from modules.NamedTimespan import getRelativeDatetime, timespans
 import pytz
-from .externalParameter.persistence import DBPersist
+from .persistence import DBPersist
 from ProjectConfig.Project import getProject
 from copy import deepcopy
 
@@ -173,12 +173,12 @@ class InstrumentLoggerQueryUi(Form, Base):
                     plotName = str(self.comboBoxPlotName.currentText()) 
                 if steps:
                     trace.x = numpy.array( time+[time[-1]] )
-                    plottedTrace = PlottedTrace( trace, self.plotDict[plotName]["view"], xAxisLabel = "local time", plotType=PlottedTrace.Types.steps, fill=False, windowName=plotName) #@UndefinedVariable
+                    plottedTrace = PlottedTrace( trace, self.plotDict[plotName], xAxisLabel = "local time", plotType=PlottedTrace.Types.steps, fill=False, windowName=plotName) #@UndefinedVariable
                 else:
                     trace.x = numpy.array( time )
                     trace.top = numpy.array( top )
                     trace.bottom = numpy.array( bottom )
-                    plottedTrace = PlottedTrace( trace, self.plotDict[plotName]["view"], xAxisLabel = "local time", windowName=plotName)
+                    plottedTrace = PlottedTrace( trace, self.plotDict[plotName], xAxisLabel = "local time", windowName=plotName)
                     plottedTrace.trace.autoSave = self.traceui.autoSaveTraces
                     plottedTrace.name = trace.name
                     plottedTrace.trace.filenamePattern = trace.name

@@ -15,11 +15,12 @@ from numpy import linspace
 from modules import MyException
 from modules.SequenceDict import SequenceDict
 from modules.doProfile import doprofile
+from modules.quantity import value
 from .AdjustValue import AdjustValue
 from ProjectConfig.Project import getProject
 from uiModules.ImportErrorPopup import importErrorPopup
 from Chassis.itfParser import itfParser
-from pulser.DACController import DACControllerException
+from pulser.DACControllerServer import DACControllerException
 from inspect import isfunction
 
 project = getProject()
@@ -285,7 +286,7 @@ class VoltageBlender(QtCore.QObject):
         self.lineGain = lineGain
         self.globalGain = globalGain
         #self.lineno = lineno
-        line = self.adjustLine( line )
+        line = self.adjustLine(line, lineno)
         if len(localadjustline) > 0:
             line = numpy.add( line, localadjustline )
         line *= self.globalGain
@@ -300,7 +301,7 @@ class VoltageBlender(QtCore.QObject):
                     self.applyLine(line, self.lineGain, self.globalGain)
                     logger.debug( "shuttling applied line {0}".format( line ) )
             self.shuttlingOnLine.emit(line)
-        else:  # this stuff does not work yet
+        else:
             if definition:
                 logger.info( "Starting finite shuttling" )
                 globaladjust = [0]*len(self.lines[0])
@@ -312,12 +313,15 @@ class VoltageBlender(QtCore.QObject):
                 self.outputVoltage = line = self.calculateLine( float(self.shuttleTo), float(self.lineGain), float(self.globalGain) )
                 self.dataChanged.emit(0, 1, len(self.electrodes)-1, 1)
                         
-    def adjustLine(self, line):
-        offset = numpy.zeros(len(line))
+    def adjustLine(self, lineData, lineno=None):
+        offset = numpy.zeros(len(lineData))
         for adjust in self.adjustDict.values():
-            offset += self.adjustLines[adjust.line] * float(adjust.floatValue)
+            if lineno is None:
+                offset += self.adjustLines[adjust.line] * float(adjust.floatValue)
+            else:
+                offset += self.adjustLines[adjust.line] * float(adjust.func(lineno))
         offset *= self.adjustGain
-        return (line+offset)
+        return (lineData + offset)
             
     def blendLines(self, lineno, lineGain):
         if self.lines:
@@ -335,10 +339,7 @@ class VoltageBlender(QtCore.QObject):
         result = numpy.zeros(channelCount)
         for record in self.localAdjustVoltages:
             if record.solution:
-                if isfunction(record.gain.value):
-                    result = numpy.add(result, (record.solution[left]*(1-convexc)*record.gain.value(left) + record.solution[right]*convexc*record.gain.value(right)))
-                else:
-                    result = numpy.add(result, (record.solution[left]*(1-convexc) + record.solution[right]*convexc)*record.gainValue)
+                result = numpy.add(result, (record.solution[left]*(1-convexc) + record.solution[right]*convexc)*float(record.gain.func(lineno)))
         return result
             
     def close(self):
@@ -346,7 +347,7 @@ class VoltageBlender(QtCore.QObject):
 
     def writeShuttleLookup(self, edgeList, address=0):
         if(self.dacController.isOpen):
-            self.dacController.writeShuttleLookup(edgeList, address)
+            self.dacController.writeShuttleLookup(list(edgeList), address)  # list() removes extra fields of ShuttlingGraph
     
     def writeData(self, shuttlingGraph):
         towrite = list()
@@ -366,14 +367,19 @@ class VoltageBlender(QtCore.QObject):
 
     stateFields = ('lineGain', 'globalGain', 'adjustGain')
     def shuttlingDataHash(self):
-        h = hash(itertools.chain((getattr(self, field).to_tuple() for field in self.stateFields),
-                                 (q.to_tuple() for q in self.adjustDict.values()),
-                                 (q.to_tuple() for q in self.localAdjustVoltages)))
+        data1 = tuple(value(getattr(self, field) for field in self.stateFields))
+        data2 = tuple(value(v.value) for v in self.adjustDict.values())
+        data3 = tuple((a.gainValue, a.solutionHash) for a in self.localAdjustVoltages)
+        h = hash((data1, data2, data3))
         logging.getLogger(__name__).info("Shuttling Hash: {0:x}".format(h))
+        logging.getLogger(__name__).debug(str((data1, data2, data3)))
         return h
     
     def shuttlingDataValid(self):
-        return self.shuttlingDataHash()==self.uploadedDataHash
+        valid = self.shuttlingDataHash() == self.uploadedDataHash
+        if not valid:
+            logging.getLogger(__name__).info("Shuttling data hash: {:x}, uploaded data hash {:x}".format(self.shuttlingDataHash(), self.uploadedDataHash))
+        return valid
         
     def trigger(self):
         self.dacController.triggerShuttling()
