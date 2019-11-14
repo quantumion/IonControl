@@ -1013,4 +1013,5 @@ if __name__ == '__main__':
             ui.setupUi(ui)
             LoggingSetup.qtHandler.textWritten.connect(ui.onMessageWrite)
             ui.show()
+            print('This will be exited now.')
             sys.exit(app.exec_())
