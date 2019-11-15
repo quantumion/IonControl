@@ -65,3 +65,7 @@ tests/push.py
 evaltree.db
 *.pem
 /.metadata/
+src/leastsqbound/
+src/objecthash/
+src/pyqtgraph/
+src/pint/
