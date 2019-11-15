@@ -13,7 +13,7 @@ from .ExternalParameterBase import ExternalParameterBase
 from ProjectConfig.Project import getProject
 from uiModules.ImportErrorPopup import importErrorPopup
 from .qtHelper import qtHelper
-
+#LKSJDFLJ
 project=getProject()
 wavemeterEnabled = project.isEnabled('hardware', 'HighFinesse Wavemeter')
 visaEnabled = project.isEnabled('hardware', 'VISA')

@@ -11,3 +11,12 @@ Traceback (most recent call last):
   File "c:\users\rich\desktop\new folder\ioncontrol\src\pint\pint\quantity.py", line 633, in _add_sub
     _to_magnitude(other, self.force_ndarray))
 TypeError: unsupported operand type(s) for -: 'int' and 'str'
+=======
+2019-11-14 14:16:09,498 ERROR externalParameter.ExternalParameterSelection(ExternalParameterSelection.py:125 onEnableChanged) 'RG4000 Waveform Generator' while enabling instrument asdf
+Traceback (most recent call last):
+  File "C:\Users\ions\Documents\IonControl\externalParameter\ExternalParameterSelection.py", line 123, in onEnableChanged
+    self.enableInstrument(parameter)
+  File "C:\Users\ions\Documents\IonControl\externalParameter\ExternalParameterSelection.py", line 153, in enableInstrument
+    instance = self.classdict[parameter.className](parameter.name, parameter.settings, self.globalDict, parameter.instrument)
+KeyError: 'RG4000 Waveform Generator'
+>>>>>>> master
