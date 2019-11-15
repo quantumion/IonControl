@@ -17,36 +17,93 @@ from .qtHelper import qtHelper
 project=getProject()
 wavemeterEnabled = project.isEnabled('hardware', 'HighFinesse Wavemeter')
 visaEnabled = project.isEnabled('hardware', 'VISA')
-DG4000Enabled = project.isEnabled('hardware', 'DG4000')
+DG4000Enabled = project.isEnabled('hardware', 'DG4000 AWG')
 from PyQt5 import QtCore
 
 if DG4000Enabled:
-    class RG4000WFGenerator(ExternalParameterBase):
-        className = "RG4000 Waveform Generator"
-        _outputChannels = OrderedDict([("Curr1", "A"), ("Curr2", "A"), ("Curr3", "A"), ("Curr4", "A"), ("Volt1", "V"),
-                                       ("Volt2", "V"), ("Volt3", "V"), ("Volt4", "V"), ("OutEnable1", ""),
-                                       ("OutEnable2", ""), ("OutEnable3", ""), ("OutEnable4", "")])
-        _inputChannels = OrderedDict([('Frequency','kHz'),
-                                       ('Amplitude(Vpp)','V'),
-                                       ('Offset','V'),
-                                       ('Function','')])
-        _outputLookup = {'Frequency':('frequency','Hz'),
-                         'Amplitude(Vpp)':('amplitude','V'),
-                         'Offset': ('offset','V'),
-                         'Function': ('function','')}
+    print(DG4000Enabled)
+    class RG4000WFGeneratorNonVisa(ExternalParameterBase):
+        className = "RG4000 Waveform Generator Non VISA"
+	#Populates the Params Control 
+        _outputChannels = OrderedDict([("OutEnable1", ""),
+                                       ("OutEnable2", ""),
+                                       ("Freq1", "Hz"),
+                                       ("Freq2", "Hz"),
+                                       ("Amp1", "V"),
+                                       ("Amp2", "V"),
+                                       #("SweepEnabled1", ""),
+                                       #("SweepEnabled2", ""),
+                                       ("SweepStartFreq1", "Hz"),
+                                       ("SweepStartFreq2", "Hz"),
+                                       ("SweepStopFreq1", "Hz"),
+                                       ("SweepStopFreq2", "Hz"),
+                                       ("SweepTime1", "s"),
+                                       ("SweepTime2", "s"),
+                                       ("SweepReturnTime1", "s"),
+                                       ("SweepReturnTime2", "s")]
+                                      )
+
+        _outputLookup = { "OutEnable1": ("OUTP1:STAT", 1, ""),
+                          "OutEnable2": ("OUTP2:STAT", 2, ""),
+                          "Freq1": ("SOUR1:FREQ", 1, "Hz"),
+                          "Freq2": ("SOUR2:FREQ", 2, "Hz"),
+                          "Amp1": ("SOUR1:VOLT:AMPL", 1, "V"),
+                          "Amp2": ("SOUR2:VOLT:AMPL", 2, "V"),
+                          #"SweepEnabled1": ("SOUR1:FREQ:MODE", 0, ""),
+                          #"SweepEnabled2": ("SOUR2:FREQ:MODE", 0, ""),
+                          "SweepStartFreq1": ("SOUR1:FREQ:STAR", 1, "Hz"),
+                          "SweepStartFreq2": ("SOUR2:FREQ:STAR", 2, "Hz"),
+                          "SweepStopFreq1": ("SOUR1:FREQ:STOP", 1, "Hz"),
+                          "SweepStopFreq2": ("SOUR2:FREQ:STOP", 2, "Hz"),
+                          "SweepTime1": ("SOUR1:SWE:TIME", 1, "s"),
+                          "SweepTime2": ("SOUR2:SWE:TIME", 2, "s"),
+                          "SweepReturnTime1": ("SOUR1:SWE:RTIM", 1, "s"),
+                          "SweepReturnTime2": ("SOUR2:SWE:RTIM", 2, "s")}
+
+
+        _inputChannels = {"OutEnable1": "",
+                          "OutEnable2": "",
+                          "Freq1": "Hz",
+                          "Freq2": "Hz",
+                          "Amp1": "V",
+                          "Amp2": "V",
+                          #"SweepEnabled1": "",
+                          #"SweepEnabled2": "",
+                          "SweepStartFreq1": "Hz",
+                          "SweepStartFreq2": "Hz",
+                          "SweepStopFreq1": "Hz",
+                          "SweepStopFreq2": "Hz",
+                          "SweepTime1": "s",
+                          "SweepTime2": "s",
+                          "SweepReturnTime1": "s",
+                          "SweepReturnTime2": "s"}
         def __init__(self, name, config, globalDict, instrument="TCPIP0::192.168.168.21::inst0::INSTR"):
             ExternalParameterBase.__init__(self, name, config, globalDict)
             self.rm = visa.ResourceManager()
             self.instrument = self.rm.open_resource( instrument)
             self.setDefaults()
-        def TurnOn(self):
-            self.instrument.write(':OUTPut ON')
-            return "ON"
-        def TurnOff(self):
-            self.instrument.write(':OUTPut OFF')
-            return "OFF"
-        def setValue(self):
-            return "OFF"
+            self.initializeChannelsToExternals()
+            self.qtHelper = qtHelper()
+            self.newData = self.qtHelper.newData
+            self.initOutput()   
+        def setValue(self, channel, v):
+            function, index, unit = self._outputLookup[channel]
+            #print(function)
+            if(function == ':OUTP1' or function == ':OUTP2' or function == 'OUTP1:STAT' or function == 'OUTP2:STAT'):
+                #print('YOOYoooOyo I made it in here StandardExternalParameter')
+                command = "{0} {1}".format(function, v)
+            else:
+                command = "{0} {1}".format(function, v.m_as(unit))#, index)
+            #print(command)
+            self.instrument.write(command) #set voltage
+            return v
+        def getValue(self, channel):
+            function, index, unit = self._outputLookup[channel]
+            command = "{0}?".format(function)#, index)
+            try:
+                return Q(float(self.instrument.query(command)), unit) #set voltage
+            except:
+                return self.instrument.query(command)
         def close(self):
             del self.instrument
 
@@ -125,12 +182,6 @@ if visaEnabled:
             self.qtHelper = qtHelper()
             self.newData = self.qtHelper.newData
             self.initOutput()            
-        def TurnOn(self):
-            self.instrument.write(':OUTPut ON')
-            return "ON"
-        def TurnOff(self):
-            self.instrument.write(':OUTPut OFF')
-            return "OFF"
         def setValue(self, channel, v):
             function, index, unit = self._outputLookup[channel]
             #print(function)
@@ -139,7 +190,7 @@ if visaEnabled:
                 command = "{0} {1}".format(function, v)
             else:
                 command = "{0} {1}".format(function, v.m_as(unit))#, index)
-            print(command)
+            #print(command)
             self.instrument.write(command) #set voltage
             return v
         def getValue(self, channel):

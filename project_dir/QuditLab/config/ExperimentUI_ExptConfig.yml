@@ -6,6 +6,10 @@ databaseConnection:
   port: 5432
   user: python
 hardware:
+  DG4000 AWG:
+    null:
+      Visa Address: ''
+      enabled: true
   Opal Kelly FPGA:
     null:
       bitFile: C:/Users/ions/Documents/Backup/IonControl_Develop/FPGA_Ions/IonControl-firmware-no-div.bit
