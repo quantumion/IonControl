@@ -12,7 +12,7 @@ hardware:
       enabled: true
   Opal Kelly FPGA:
     null:
-      bitFile: C:/Users/ions/Documents/Backup/IonControl_Develop/FPGA_Ions/IonControl-firmware-no-div.bit
+      bitFile: ./FPGA_Ions/IonControl-firmware-no-div.bit
       device: Pulser
       enabled: true
       uploadOnStartup: true
