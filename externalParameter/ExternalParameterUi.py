@@ -112,6 +112,11 @@ class ExternalParameterControlModel(CategoryTreeModel):
             value = targetValue or inst.targetValue
             logger = logging.getLogger(__name__)
             logger.debug("setValueFollowup {0}".format(inst.value))
+            if(value == 'ON' or value == 'OFF'):
+                if(value == 'ON'):
+                    value = 1
+                else:
+                    value = 0
             if not inst.setValue(value):
                 delay = int(inst.settings.delay.m_as('ms'))
                 QtCore.QTimer.singleShot(delay, functools.partial(self.setValueFollowup, inst, None))
