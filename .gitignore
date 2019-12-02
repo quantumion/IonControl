@@ -69,3 +69,4 @@ src/leastsqbound/
 src/objecthash/
 src/pyqtgraph/
 src/pint/
+*.log

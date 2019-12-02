@@ -1,0 +1,22 @@
+parameter ShutterWait
+parameter WaitandSee
+parameter WaitToReverseAblationTTL
+shutter init
+masked_shutter OpenAblationShutter
+masked_shutter FlashAblation
+masked_shutter AblationToTrap
+
+set_shutter(init)
+update()
+set_shutter(OpenAblationShutter)
+update(ShutterWait)
+update()
+set_shutter(FlashAblation)
+update(WaitToReverseAblationTTL)
+update()
+set_inv_shutter(FlashAblation)
+update(WaitandSee)
+update()
+set_parameter(OutEnable1, Off)
+update()
+set_parameter(OutEnable1, On)
