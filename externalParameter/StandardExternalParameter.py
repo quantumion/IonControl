@@ -69,8 +69,8 @@ if PLL_Synthesizer_Enabled:
         instrument_list = project.hardware.get('Frequency Synthesizer PLLs').keys()
         return instrument_list
 
-	def close(self):
-            del self.instrument
+    def close(self):
+        del self.instrument
 
 if DG4000Enabled:
     print(DG4000Enabled)
