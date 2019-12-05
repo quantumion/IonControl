@@ -23,7 +23,7 @@ from PyQt5 import QtCore
 
 if PLL_Synthesizer_Enabled:
     #print(PLL_Synthesizer_Enabled)
-    from PLLControl.PLL_Controller.py import PLLController
+    from PLLControl.PLL_Controller import *
 
     class PLL_Synthesizer(ExternalParameterBase):
     
