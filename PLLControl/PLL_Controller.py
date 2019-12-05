@@ -24,7 +24,7 @@ class PllController:
     # Frequencies are in MHz
     pi_database = {
         'pi3':{
-            'ip': '192.168.168.103',
+            'ip': '169.254.9.85', #'192.168.168.103',
             'usr': 'pi',
             'pwd': 'raspberry',
             'attn':{
@@ -124,7 +124,7 @@ class PllController:
         self.sp.stdin.close()
         self.sp.kill()
         return True
-
+"""
 class PllShell(cmd.Cmd):
     'CLI for the PLLController class.'
     # Startup paramaters and parateters to keep track of attentuation for the CLI
@@ -349,3 +349,4 @@ if __name__ == "__main__":
     else:
         print('Doing nothing:\n\n\n')
         pass
+"""

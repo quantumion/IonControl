@@ -22,61 +22,57 @@ PLL_Synthesizer_Enabled = project.isEnabled('hardware', 'Frequency Synthesizer P
 from PyQt5 import QtCore
 
 if PLL_Synthesizer_Enabled:
-	print(PLL_Synthesizer_Enabled)
-    from PLLControl.PLL_controller.py import PLLController
+    #print(PLL_Synthesizer_Enabled)
+    from PLLControl.PLL_Controller.py import PLLController
 
     class PLL_Synthesizer(ExternalParameterBase):
-	'''
-	Communicate with PLL Synthesizer Evalboards through Raspberry Pi's to generate frequency sources for EOMs.
-	'''
-	className = "Frequency Synthesizer PLLs"
-	_outputChannels = OrderedDict([('Frequency', 'kHz'),
-									('Attenuation', 'dBm')
-									('GPIO', 'pin')])
-	_outputLookup = {'Frequency': ('frequency', 'Hz'),
-					 'Attenuation': ('attenuation', 'dB'),
-					 'GPIO': ('gpio', 'pin')}
+    
+    #Communicate with PLL Synthesizer Evalboards through Raspberry Pi's to generate frequency sources for EOMs.
 
-	def __init__(self, name, config, globalDict, instrument):
-		logger = logging.getLogger(__name__)
-        ExternalParameterBase.__init__(self, name, config, globalDict)
-        project = getProject()
-        instrument_list = project.hardware.get('Frequency Synthesizer PLLs')
-        instrument = instrument_list[instrument]
-        pi_name = instrument.get('piName')
-        self.PLLController = PLLController(pi_name)
-        logger.info("Trying to connect to Raspberry pi {0}".format(ip_addr))
-        self.PLLController.connect()
-        self.initializeChannelsToExternals()
-        self.qtHelper = qtHelper()
-        self.newData = self.qtHelper.newData
+        className = "Frequency Synthesizer PLLs"
+        _outputChannels = OrderedDict([('Frequency', 'kHz'), ('Attenuation', 'dBm'), ('GPIO', 'pin')])
+        _outputLookup = {'Frequency': ('frequency', 'Hz'), 'Attenuation': ('attenuation', 'dB'), 'GPIO': ('gpio', 'pin')}
 
-	def setValue(self, channel, v):
-        func_name, unit = self._outputLookup[channel]
-        setattr(self.PLLController, func_name, v.m_as(unit))
-        return v
+        def __init__(self, name, config, globalDict, instrument):
+            logger = logging.getLogger(__name__)
+            ExternalParameterBase.__init__(self, name, config, globalDict)
+            project = getProject()
+            instrument_list = project.hardware.get('Frequency Synthesizer PLLs')
+            instrument = instrument_list[instrument]
+            pi_name = instrument.get('piName')
+            self.PLLController = PLLController(pi_name)
+            logger.info("Trying to connect to Raspberry pi {0}".format(ip_addr))
+            self.PLLController.connect()
+            self.initializeChannelsToExternals()
+            self.qtHelper = qtHelper()
+            self.newData = self.qtHelper.newData
 
-    def getValue(self, channel):
-        func_name, unit = self._outputLookup[channel]
-        v = getattr(self.PLLController, func_name)
-        return Q(v, unit)
+        def setValue(self, channel, v):
+            func_name, unit = self._outputLookup[channel]
+            setattr(self.PLLController, func_name, v.m_as(unit))
+            return v
 
-    def getExternalValue(self, channel):
-        return self.getValue(channel)
+        def getValue(self, channel):
+            func_name, unit = self._outputLookup[channel]
+            v = getattr(self.PLLController, func_name)
+            return Q(v, unit)
 
-    def connectedInstruments(self):
-        project = getProject()
-        instrument_list = project.hardware.get('Frequency Synthesizer PLLs').keys()
-        return instrument_list
+        def getExternalValue(self, channel):
+            return self.getValue(channel)
 
-    def close(self):
-        del self.instrument
+        def connectedInstruments(self):
+            project = getProject()
+            instrument_list = project.hardware.get('Frequency Synthesizer PLLs').keys()
+            return instrument_list
+
+        def close(self):
+            del self.instrument
 
 if DG4000Enabled:
     print(DG4000Enabled)
     class RG4000WFGeneratorNonVisa(ExternalParameterBase):
         className = "RG4000 Waveform Generator Non VISA"
-	#Populates the Params Control 
+    #Populates the Params Control 
         _outputChannels = OrderedDict([("OutEnable1", ""),
                                        ("OutEnable2", ""),
                                        ("Freq1", "Hz"),

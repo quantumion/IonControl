@@ -98,7 +98,7 @@ hardware:
   Frequency Synthesizer PLLs:
     description: Raspberry pi controlled PLLs for generating frequency sources to send to EOMs
     fields:
-		piName: str
+        piName: str
   HighFinesse Wavemeter:
     description: HighFinesse Wavemeter from Toptica photonics for reading laser wavelengths, with Java applet web interface
     fields:

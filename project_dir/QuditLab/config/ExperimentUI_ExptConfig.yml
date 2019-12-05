@@ -9,17 +9,21 @@ hardware:
   DG4000 AWG:
     null:
       Visa Address: ''
+      enabled: false
+  Frequency Synthesizer PLLs:
+    null:
       enabled: true
+      piName: pi3
   Opal Kelly FPGA:
     null:
       bitFile: ./FPGA_Ions/IonControl-firmware-no-div.bit
       device: Pulser
-      enabled: true
+      enabled: false
       uploadOnStartup: true
   VISA:
     null:
-      enabled: true
-showGui: false
+      enabled: false
+showGui: true
 software:
   Pulser:
     null:
