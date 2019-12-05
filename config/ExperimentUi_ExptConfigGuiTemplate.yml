@@ -95,6 +95,10 @@ hardware:
     description: Rigol arbitrary waveform generator
     fields:
         Visa Address: str
+  Frequency Synthesizer PLLs:
+    description: Raspberry pi controlled PLLs for generating frequency sources to send to EOMs
+    fields:
+		piName: str
   HighFinesse Wavemeter:
     description: HighFinesse Wavemeter from Toptica photonics for reading laser wavelengths, with Java applet web interface
     fields:
