@@ -13,7 +13,7 @@ hardware:
   Frequency Synthesizer PLLs:
     null:
       enabled: true
-      piName: pi3
+      piName: pi5
   Opal Kelly FPGA:
     null:
       bitFile: ./FPGA_Ions/IonControl-firmware-no-div.bit
@@ -27,7 +27,7 @@ showGui: true
 software:
   Pulser:
     null:
-      enabled: true
+      enabled: false
       hardware: Opal Kelly FPGA
 useCustomDatabaseName: false
 version: 2.0

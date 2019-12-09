@@ -30,8 +30,18 @@ if PLL_Synthesizer_Enabled:
     #Communicate with PLL Synthesizer Evalboards through Raspberry Pi's to generate frequency sources for EOMs.
 
         className = "Frequency Synthesizer PLLs"
-        _outputChannels = OrderedDict([('Frequency', 'kHz'), ('Attenuation', 'dBm'), ('GPIO', 'pin')])
-        _outputLookup = {'Frequency': ('frequency', 'Hz'), 'Attenuation': ('attenuation', 'dB'), 'GPIO': ('gpio', 'pin')}
+        _outputChannels = OrderedDict([('FrequencyEOM1', 'MHz'),
+                                       ('FrequencyEOM2', 'MHz'),
+                                       ('FrequencyEOM3', 'MHz'),
+                                       ('AttenuationEOM1', 'dBm'),
+                                       ('AttenuationEOM2', 'dBm'),
+                                       ('AttenuationEOM3', 'dBm')])
+        _outputLookup = {'FrequencyEOM1': ('freq', '4', 'MHz'),
+                         'FrequencyEOM2': ('freq', '5', 'MHz'),
+                         'FrequencyEOM3': ('freq', '6', 'MHz'),
+                         'AttenuationEOM1': ('attn', '12', 'dBm'),
+                         'AttenuationEOM2': ('attn', '13', 'dBm'),
+                         'AttenuationEOM3': ('attn', '16', 'dBm')}
 
         def __init__(self, name, config, globalDict, instrument):
             logger = logging.getLogger(__name__)
@@ -41,24 +51,18 @@ if PLL_Synthesizer_Enabled:
             instrument = instrument_list[instrument]
             pi_name = instrument.get('piName')
             self.PLLController = PLLController(pi_name)
-            logger.info("Trying to connect to Raspberry pi {0}".format(ip_addr))
-            self.PLLController.connect()
+            logger.info("Trying to connect to Raspberry pi {0}".format(pi_name))
+            #self.PLLController.connect()
             self.initializeChannelsToExternals()
             self.qtHelper = qtHelper()
             self.newData = self.qtHelper.newData
 
         def setValue(self, channel, v):
-            func_name, unit = self._outputLookup[channel]
-            setattr(self.PLLController, func_name, v.m_as(unit))
-            return v
-
-        def getValue(self, channel):
-            func_name, unit = self._outputLookup[channel]
-            v = getattr(self.PLLController, func_name)
-            return Q(v, unit)
-
-        def getExternalValue(self, channel):
-            return self.getValue(channel)
+            func_name, gpio, unit = self._outputLookup[channel]
+            if func_name == 'freq':
+                self.PLLController.change_freq(gpio, v)
+            else:
+                self.PLLController.change_attn(gpio, v)
 
         def connectedInstruments(self):
             project = getProject()
@@ -66,6 +70,7 @@ if PLL_Synthesizer_Enabled:
             return instrument_list
 
         def close(self):
+            self.PLLController.terminate()
             del self.instrument
 
 if DG4000Enabled:
