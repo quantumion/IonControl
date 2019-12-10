@@ -22,8 +22,7 @@ PLL_Synthesizer_Enabled = project.isEnabled('hardware', 'Frequency Synthesizer P
 from PyQt5 import QtCore
 
 if PLL_Synthesizer_Enabled:
-    #print(PLL_Synthesizer_Enabled)
-    from PLLControl.PLL_Controller import *
+    from PLLControl.PLL_Controller import PLLController
 
     class PLL_Synthesizer(ExternalParameterBase):
     
@@ -33,44 +32,44 @@ if PLL_Synthesizer_Enabled:
         _outputChannels = OrderedDict([('FrequencyEOM1', 'MHz'),
                                        ('FrequencyEOM2', 'MHz'),
                                        ('FrequencyEOM3', 'MHz'),
-                                       ('AttenuationEOM1', 'dBm'),
-                                       ('AttenuationEOM2', 'dBm'),
-                                       ('AttenuationEOM3', 'dBm')])
+                                       ('AttenuationEOM1', 'dB'),
+                                       ('AttenuationEOM2', 'dB'),
+                                       ('AttenuationEOM3', 'dB')])
         _outputLookup = {'FrequencyEOM1': ('freq', '4', 'MHz'),
-                         'FrequencyEOM2': ('freq', '5', 'MHz'),
-                         'FrequencyEOM3': ('freq', '6', 'MHz'),
-                         'AttenuationEOM1': ('attn', '12', 'dBm'),
-                         'AttenuationEOM2': ('attn', '13', 'dBm'),
-                         'AttenuationEOM3': ('attn', '16', 'dBm')}
+                         'FrequencyEOM2': ('freq', '8', 'MHz'),
+                         'FrequencyEOM3': ('freq', '9', 'MHz'),
+                         'AttenuationEOM1': ('attn', '12', 'dB'),
+                         'AttenuationEOM2': ('attn', '13', 'dB'),
+                         'AttenuationEOM3': ('attn', '16', 'dB')}
 
         def __init__(self, name, config, globalDict, instrument):
             logger = logging.getLogger(__name__)
             ExternalParameterBase.__init__(self, name, config, globalDict)
             project = getProject()
+            self.pi = PLLController(instrument)
             instrument_list = project.hardware.get('Frequency Synthesizer PLLs')
-            instrument = instrument_list[instrument]
-            pi_name = instrument.get('piName')
-            self.PLLController = PLLController(pi_name)
-            logger.info("Trying to connect to Raspberry pi {0}".format(pi_name))
+            #instrument = instrument_list[instrument]
+            #pi_name = instrument.get('piName')
+            logger.info("Trying to connect to Raspberry pi {0}".format(instrument))
             #self.PLLController.connect()
             self.initializeChannelsToExternals()
             self.qtHelper = qtHelper()
             self.newData = self.qtHelper.newData
 
         def setValue(self, channel, v):
+            value = str(v)
+            if value.endswith(' MHz'):
+                value = value[:-4]
+            else:
+                value = value[:-3]
             func_name, gpio, unit = self._outputLookup[channel]
             if func_name == 'freq':
-                self.PLLController.change_freq(gpio, v)
+                self.pi.change_freq(gpio, value)
             else:
-                self.PLLController.change_attn(gpio, v)
-
-        def connectedInstruments(self):
-            project = getProject()
-            instrument_list = project.hardware.get('Frequency Synthesizer PLLs').keys()
-            return instrument_list
+                self.pi.change_attn(gpio, value)
 
         def close(self):
-            self.PLLController.terminate()
+            self.pi.terminate()
             del self.instrument
 
 if DG4000Enabled:
