@@ -36,8 +36,8 @@ if PLL_Synthesizer_Enabled:
                                        ('AttenuationEOM2', 'dB'),
                                        ('AttenuationEOM3', 'dB')])
         _outputLookup = {'FrequencyEOM1': ('freq', '4', 'MHz'),
-                         'FrequencyEOM2': ('freq', '8', 'MHz'),
-                         'FrequencyEOM3': ('freq', '9', 'MHz'),
+                         'FrequencyEOM2': ('freq', '5', 'MHz'),
+                         'FrequencyEOM3': ('freq', '6', 'MHz'),
                          'AttenuationEOM1': ('attn', '12', 'dB'),
                          'AttenuationEOM2': ('attn', '13', 'dB'),
                          'AttenuationEOM3': ('attn', '16', 'dB')}

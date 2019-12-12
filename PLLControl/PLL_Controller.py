@@ -24,13 +24,13 @@ class PLLController:
     # Frequencies are in MHz
     pi_database = {
         'pi1':{
-            #'ip': '192.168.168.101',
+            'ip': '192.168.168.101',
             'usr': 'pi',
             'pwd': 'raspberry',
             'val': '-1'
          },
         'pi2':{
-            #'ip': '192.168.168.102',
+            'ip': '192.168.168.102',
             'usr': 'pi',
             'pwd': 'raspberry',
             'val': '-1'
@@ -42,7 +42,7 @@ class PLLController:
             'val': '-1'
          },
         'pi4':{
-            #'ip': '192.168.168.104',
+            'ip': '192.168.168.104',
             'usr': 'pi',
             'pwd': 'raspberry',
             'val': '-1'
