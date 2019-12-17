@@ -747,3 +747,80 @@ class DummySingleParameter(ExternalParameterBase):
     def connectedInstruments(cls):
         return ['Anything will do']
          
+
+DC_Controller_Enabled = project.isEnabled('hardware', 'Senkolab Four rod DC Controller')
+
+if DC_Controller_Enabled:
+    try:
+        from DC_Voltage_Control.src.DC_voltage_control_python.dc_ctr_rpc_client import FourRodDCControllerClient
+        from DC_Voltage_Control.src.DC_voltage_control_python.dc_ctr_enum import *
+    except ImportError:
+        importErrorPopup('DC Voltage Control')
+
+
+    class DCVoltageControl(ExternalParameterBase):
+        """
+        Control the voltages on rods and needles for the four rod trap
+        """
+        className = "Four rod DC Voltage Control"
+        _outputChannels = OrderedDict([
+            ('Enable Remote Control', ''),
+            ('Needle_1_Voltage', 'V'),
+            ('Needle_2_Voltage', 'V'),
+            ('Rod_1_Voltage', 'V'),
+            ('Rod_2_Voltage', 'V'),
+            ('Rod_3_Voltage', 'V'),
+            ('Rod_4_Voltage', 'V')])
+
+        _outputLookup = {
+            'Needle_1_Voltage': CHANNEL_N1,
+            'Needle_2_Voltage': CHANNEL_N2,
+            'Rod_1_Voltage': CHANNEL_R1,
+            'Rod_2_Voltage': CHANNEL_R2,
+            'Rod_3_Voltage': CHANNEL_R3,
+            'Rod_4_Voltage': CHANNEL_R4
+        }
+
+        def __init__(self, name, config, globalDict, instrument):
+            logger = logging.getLogger(__name__)
+            ExternalParameterBase.__init__(self, name, config, globalDict)
+            project = getProject()
+            instrument_list = project.hardware.get('Senkolab Four rod DC Controller')
+            instrument = instrument_list[instrument]
+            ip_addr = instrument.get('ipAddress')
+            port = instrument.get('port')
+            self.dc_client = FourRodDCControllerClient(address=ip_addr + ':' + port)
+            
+            # self.initializeChannelsToExternals()
+            self.initOutput()
+            self.qtHelper = qtHelper()
+            self.newData = self.qtHelper.newData
+
+        def setValue(self, channel, v):
+            if channel == 'Enable Remote Control':
+                v = v.m_as('')
+                v = int(v)
+                if v not in (0, 1, 255):
+                    raise ValueError("Not an available mode!!!!!")
+                self.dc_client.set_mode_all(v)
+            else:
+                v = v.m_as('V')
+                v = float(v)
+                v_channel = self._outputLookup[channel]
+                print(v_channel, v)
+                self.dc_client.set_volt(v_channel, v)
+
+        def getExternalValue(self, channel=None):
+            if channel == 'Enable Remote Control':
+                mode = self.dc_client.get_mode(CHANNEL_N1)
+                return Q(mode, '')
+            else:
+                v_channel = self._outputLookup[channel]
+                voltage = self.dc_client.get_volt_adc(v_channel)
+                voltage = round(voltage,4)
+                return Q(voltage, 'V')
+
+        def connectedInstruments(self):
+            project = getProject()
+            instrument_list = project.hardware.get('Senkolab Four rod DC Controller').keys()
+            return instrument_list

@@ -16,6 +16,11 @@ hardware:
       device: Pulser
       enabled: true
       uploadOnStartup: true
+  Senkolab Four rod DC Controller:
+    null:
+      enabled: true
+      ipAddress: 192.168.168.8
+      port: '50051'
   VISA:
     null:
       enabled: true
