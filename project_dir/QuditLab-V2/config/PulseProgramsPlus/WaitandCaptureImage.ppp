@@ -6,8 +6,6 @@ parameter experiments
 parameter WaitandSee
 parameter TrapFlushWait
 parameter WaittoFlash
-parameter NumberofPulses
-parameter PulseInterval
 shutter init
 masked_shutter OpenAblationShutter
 masked_shutter FlashAblation
@@ -15,47 +13,21 @@ masked_shutter Monitor
 masked_shutter CaptureImage
 masked_shutter TrapRF
 masked_shutter AllLasers
+masked_shutter ExperimentOn
 var currentexperiment
-var PulseCount
-var RemainingWaitTime
 exitcode endLabel = 0xffffffffffffffff
 
-set_shutter(init)
-update()
-set_shutter(Monitor)
-update(MonitorWaitTime)
-update()
-set_inv_shutter(Monitor)
-set_shutter(OpenAblationShutter)
-update(ShutterWait)
-update()
-set_shutter(AllLasers)
-update(ShutterWait)
+set_shutter(ExperimentOn)
 update()
 currentexperiment = 0
-RemainingWaitTime = WaitandSee - PulseInterval
 while currentexperiment < experiments:
-    PulseCount = 0
-    set_shutter(TrapRF)
-    update(WaittoFlash)
+    update(WaitandSee)
     update()
-    while PulseCount < NumberofPulses:
-        set_shutter(FlashAblation)
-        update(WaitToReverseAblationTTL)
-        update()
-        set_inv_shutter(FlashAblation)
-        update(PulseInterval)
-        update()
-        PulseCount += 1
-    update(RemainingWaitTime)
     set_shutter(CaptureImage)
     update(CameraTriggerWait)
     update()
     set_inv_shutter(CaptureImage)
     update(ShutterWait)
-    update()
-    set_inv_shutter(TrapRF)
-    update(TrapFlushWait)
     update()
     currentexperiment += 1
 exit(endLabel)

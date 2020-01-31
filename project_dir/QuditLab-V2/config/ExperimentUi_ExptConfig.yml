@@ -1,0 +1,35 @@
+databaseConnection:
+  database: quditlab-v2
+  echo: false
+  host: localhost
+  password: ''
+  port: 5432
+  user: python
+hardware:
+  DG4000 AWG:
+    null:
+      Visa Address: ''
+      enabled: true
+  HighFinesse Wavemeter:
+    null:
+      enabled: true
+      uri: ''
+  Opal Kelly FPGA:
+    FPGA:
+      bitFile: C:/Users/ions/Documents/IonControl/FPGA_Ions/IonControl-firmware-no-div.bit
+      device: Pulser
+      enabled: true
+      uploadOnStartup: false
+  Senkolab Four rod DC Controller:
+    null:
+      enabled: true
+      ipAddress: ''
+      port: ''
+showGui: true
+software:
+  Pulser:
+    null:
+      enabled: true
+      hardware: 'Opal Kelly FPGA: FPGA'
+useCustomDatabaseName: false
+version: 2.0
