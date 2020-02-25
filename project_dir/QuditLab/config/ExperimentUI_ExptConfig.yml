@@ -10,6 +10,10 @@ hardware:
     null:
       Visa Address: ''
       enabled: true
+  HighFinesse Wavemeter:
+    Wavemeter1:
+      enabled: true
+      uri: 192.168.168.203:8080
   Opal Kelly FPGA:
     null:
       bitFile: ./FPGA_Ions/IonControl-firmware-no-div.bit
@@ -24,7 +28,7 @@ hardware:
   VISA:
     null:
       enabled: true
-showGui: false
+showGui: true
 software:
   Pulser:
     null:

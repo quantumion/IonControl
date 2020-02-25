@@ -104,3 +104,10 @@ hardware:
     fields:
         ipAddress: str
         port: str
+  SLS Offset Frequency Lock:
+    description: Interface with custom DC controller. Check github.com/senkolab/DC_Voltage_Control
+    fields:
+        ipAddress: str
+	user: str
+	password: str
+        port: str

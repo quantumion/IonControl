@@ -8,12 +8,8 @@ databaseConnection:
 hardware:
   DG4000 AWG:
     null:
-      Visa Address: ''
+      Visa Address: TCPIP0::192.168.168.21::inst0::INSTR
       enabled: true
-  HighFinesse Wavemeter:
-    null:
-      enabled: true
-      uri: ''
   Opal Kelly FPGA:
     FPGA:
       bitFile: C:/Users/ions/Documents/IonControl/FPGA_Ions/IonControl-firmware-no-div.bit
@@ -23,8 +19,8 @@ hardware:
   Senkolab Four rod DC Controller:
     null:
       enabled: true
-      ipAddress: ''
-      port: ''
+      ipAddress: 192.168.168.8
+      port: '50051'
 showGui: true
 software:
   Pulser:
