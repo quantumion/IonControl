@@ -8,6 +8,7 @@ from collections import OrderedDict
 import logging
 import numpy
 
+
 from modules.quantity import Q
 from .ExternalParameterBase import ExternalParameterBase
 from ProjectConfig.Project import getProject
@@ -15,9 +16,11 @@ from uiModules.ImportErrorPopup import importErrorPopup
 from .qtHelper import qtHelper
 #LKSJDFLJ
 project=getProject()
-wavemeterEnabled = project.isEnabled('hardware', 'HighFinesse Wavemeter')
+HighFinesseWavemeterEnabled = project.isEnabled('hardware', 'HighFinesse Wavemeter')
+wavemeterEnabled = False
 visaEnabled = project.isEnabled('hardware', 'VISA')
 DG4000Enabled = project.isEnabled('hardware', 'DG4000 AWG')
+
 from PyQt5 import QtCore
 
 if DG4000Enabled:
@@ -107,7 +110,7 @@ if DG4000Enabled:
         def close(self):
             del self.instrument
 
-if wavemeterEnabled:
+if wavemeterEnabled or HighFinesseWavemeterEnabled:
     from wavemeter.Wavemeter import Wavemeter
 
 if visaEnabled:
@@ -115,7 +118,6 @@ if visaEnabled:
         import visa
     except ImportError: #popup on failed import of enabled visa
         importErrorPopup('VISA')
-
 
 if visaEnabled:
     class RG4000WFGenerator(ExternalParameterBase):
@@ -602,7 +604,6 @@ if visaEnabled:
         def close(self):
             del self.instrument
 
-
 if visaEnabled and wavemeterEnabled:
     class LaserWavemeterScan(AgilentPowerSupply):
         """
@@ -705,6 +706,63 @@ if wavemeterEnabled:
             superior.append({'name': 'maxAge', 'type': 'magnitude', 'value': self.settings.maxAge})
             return superior
 
+if HighFinesseWavemeterEnabled:
+    class WavemeterChannel(ExternalParameterBase):
+        """
+        Scan a laser by setting the lock point on the wavemeter lock.
+        setValue is laser frequency
+        currentValue is currently set value
+        currentExternalValue is frequency read from wavemeter
+        """
+        className = "HighFinesseChannel"
+        _outputChannels = { None: "THz"}
+        def __init__(self, name, config, globalDict, instrument="192.168.168.203:8080"):
+            print("the instrument IP is ", instrument)
+            logger = logging.getLogger(__name__)
+            ExternalParameterBase.__init__(self, name, config, globalDict)
+            self.instrument = instrument
+            self.wavemeter = Wavemeter(self.instrument)
+            #logger.info( "LaserWavemeterScan savedValue {0}".format(self.savedValue) )
+            self.channel = 1
+            self.initializeChannelsToExternals()
+            self.initOutput()
+
+
+        def setDefaults(self):
+            ExternalParameterBase.setDefaults(self)
+            self.settings.__dict__.setdefault('channel', 1)
+            self.settings.__dict__.setdefault('maxDeviation', Q(5, 'MHz'))
+            self.settings.__dict__.setdefault('maxAge', Q(2, 's'))
+
+        def setValue(self, channel, value):
+            """
+            Move one steps towards the target, return current value
+            """
+            logger = logging.getLogger(__name__)
+            if value is not None:
+                self.currentFrequency = self.wavemeter.set_frequency(value, self.settings.channel, self.settings.maxAge)
+            logger.debug( "setFrequency {0}, current frequency {1}".format(self.settings.channelSettings[None].value, self.currentFrequency) )
+            print("self.currentFrequency is", self.currentFrequency, ". self.settings.channelSettings[None].value is", self.settings.channelSettings[None].value, "self.settings.maxDeviation is", self.settings.maxDeviation)
+            arrived = self.currentFrequency is not None and abs(
+                self.currentFrequency - self.settings.channelSettings[None].value) < self.settings.maxDeviation
+            #print(arrived)
+            return value, arrived
+
+        def currentExternalValue(self, channel):
+            logger = logging.getLogger(__name__)
+            self.lastExternalValue = self.wavemeter.get_frequency(self.settings.channel, self.settings.maxAge )
+            logger.debug( str(self.lastExternalValue) )
+            self.detuning=(self.lastExternalValue)
+            self.currentFrequency = self.wavemeter.get_frequency(self.settings.channel, self.settings.maxAge )
+            return self.lastExternalValue
+
+        def paramDef(self):
+            superior = ExternalParameterBase.paramDef(self)
+            superior.append({'name': 'channel', 'type': 'int', 'value': self.settings.channel})
+            superior.append({'name': 'maxDeviation', 'type': 'magnitude', 'value': self.settings.maxDeviation})
+            superior.append({'name': 'maxAge', 'type': 'magnitude', 'value': self.settings.maxAge})
+            return superior
+            
 class DummyParameter(ExternalParameterBase):
     """
     DummyParameter, used to debug this part of the software.
@@ -748,7 +806,49 @@ class DummySingleParameter(ExternalParameterBase):
         return ['Anything will do']
          
 
-DC_Controller_Enabled = project.isEnabled('hardware', 'Senkolab Four rod DC Controller')
+SLSoflEnabled = project.isEnabled('hardware','SLS Offset Frequency Lock')
+
+if SLSoflEnabled:
+    import paramiko
+
+    class OffsetFrequencyLock(ExternalParameterBase):
+
+        className = "SLS Offset Frequency Lock"
+        _outputChannels = OrderedDict([
+            ('OffsetFrequency', 'Hz')])
+            
+        def __init__(self, name, config, globalDict, instrument):
+            logger = logging.getLogger(__name__)
+            ExternalParameterBase.__init__(self, name, config, globalDict)
+            project = getProject()
+            instrument_list = project.hardware.get('SLS Offset Frequency Lock')
+            instrument = instrument_list[instrument]
+            ip_addr = instrument.get('ipAddress')
+            user=instrument.get('user')
+            pwd=instrument.get('password')
+            port_no = instrument.get('port')
+            self.ssh_client = paramiko.SSHClient()
+            self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            self.ssh_client.connect(ip_addr, username=user, password=pwd, port=port_no)
+                
+            #self.initializeChannelsToExternals()
+            self.initOutput()
+            self.qtHelper = qtHelper()
+            self.newData = self.qtHelper.newData	
+                
+        def setValue(self, channel,v):
+            v_channel = self._outputChannels[channel]
+            v=str(v)
+            command='python setOffsetFrequency.py ' + v
+            print(command)
+            self.ssh_client.exec_command(command)	
+
+        def connectedInstruments(self):
+            project = getProject()
+            instrument_list = project.hardware.get('SLS Offset Frequency Lock').keys()
+            return instrument_list
+
+DC_Controller_Enabled = project.isEnabled('hardware', 'Senkolab Four rod DC Controller')    
 
 if DC_Controller_Enabled:
     try:

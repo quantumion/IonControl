@@ -20,6 +20,13 @@ hardware:
       device: Pulser
       enabled: true
       uploadOnStartup: true
+  SLS Offset Frequency Lock:
+    null:
+      enabled: true
+      ipAddress: 192.168.168.14
+      password: raspberry
+      port: '22'
+      user: pi
   Senkolab Four rod DC Controller:
     null:
       enabled: true
