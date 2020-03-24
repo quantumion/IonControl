@@ -17,6 +17,7 @@ def find_peaks(in_array):
     peak_positions = c[index]
     return [peak_positions,local_peaks]
 
+setScan("LoadTargetNIons")
 Filepath = "Z:/Lab Data/IonImageFolder/"
 TargetNIons = getGlobal("TargetNIons")
 CycleLimit = 100
