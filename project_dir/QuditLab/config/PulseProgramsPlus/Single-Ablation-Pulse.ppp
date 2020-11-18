@@ -1,8 +1,0 @@
-parameter ShutterWait
-parameter WaitandSee
-parameter WaitToReverseAblationTTL
-shutter init
-masked_shutter OpenAblationShutter
-masked_shutter FlashAblation
-masked_shutter AblationToTrap
-TrapRFOnOff = 0

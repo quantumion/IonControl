@@ -35,7 +35,7 @@ hardware:
   VISA:
     null:
       enabled: true
-showGui: true
+showGui: false
 software:
   Pulser:
     null:

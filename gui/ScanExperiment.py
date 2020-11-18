@@ -713,6 +713,7 @@ class ScanExperiment(ScanExperimentForm, MainWindowWidget.MainWindowWidget):
     def finalizeData(self, reason='end of scan'):
         if not self.context.dataFinalized:  # is not yet finalized
             logger = logging.getLogger(__name__)
+            print("Made it here")
             logger.info( "finalize Data reason: {0}".format(reason) )
             saveData = reason != 'aborted'
             if self.context.otherDataFile is not None:

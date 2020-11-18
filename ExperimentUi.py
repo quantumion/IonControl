@@ -1003,7 +1003,6 @@ if __name__ == '__main__':
     project = Project() #loads in the project through the config files/config GUIs
     logger = logging.getLogger("")
     setID('TrappedIons.FPGAControlProgram') #Makes the icon in the Windows taskbar match the icon set in Qt Designer
-
     overrideConfigFile = project.projectConfig.get('configurationFile')
     overrideFileType = {'.yml': 'yaml', '.yaml': 'yaml', '.db': 'sqlite'}.get(os.path.splitext(overrideConfigFile)[1], 'sqlite') if overrideConfigFile else None
     loadFromDate = project.projectConfig.get('configurationFile')

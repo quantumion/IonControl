@@ -33,17 +33,18 @@ if DG4000Enabled:
                                        ("Freq1", "Hz"),
                                        ("Freq2", "Hz"),
                                        ("Amp1", "V"),
-                                       ("Amp2", "V"),
+                                       ("Amp2", "V")
                                        #("SweepEnabled1", ""),
                                        #("SweepEnabled2", ""),
-                                       ("SweepStartFreq1", "Hz"),
-                                       ("SweepStartFreq2", "Hz"),
-                                       ("SweepStopFreq1", "Hz"),
-                                       ("SweepStopFreq2", "Hz"),
-                                       ("SweepTime1", "s"),
-                                       ("SweepTime2", "s"),
-                                       ("SweepReturnTime1", "s"),
-                                       ("SweepReturnTime2", "s")]
+                                       #("SweepStartFreq1", "Hz"),
+                                       #("SweepStartFreq2", "Hz"),
+                                       #("SweepStopFreq1", "Hz"),
+                                       #("SweepStopFreq2", "Hz"),
+                                       #("SweepTime1", "s"),
+                                       #("SweepTime2", "s"),
+                                       #("SweepReturnTime1", "s"),
+                                       #("SweepReturnTime2", "s")]
+                                       ]
                                       )
 
         _outputLookup = { "OutEnable1": ("OUTP1:STAT", 1, ""),
@@ -51,17 +52,18 @@ if DG4000Enabled:
                           "Freq1": ("SOUR1:FREQ", 1, "Hz"),
                           "Freq2": ("SOUR2:FREQ", 2, "Hz"),
                           "Amp1": ("SOUR1:VOLT:AMPL", 1, "V"),
-                          "Amp2": ("SOUR2:VOLT:AMPL", 2, "V"),
+                          "Amp2": ("SOUR2:VOLT:AMPL", 2, "V")
                           #"SweepEnabled1": ("SOUR1:FREQ:MODE", 0, ""),
                           #"SweepEnabled2": ("SOUR2:FREQ:MODE", 0, ""),
-                          "SweepStartFreq1": ("SOUR1:FREQ:STAR", 1, "Hz"),
-                          "SweepStartFreq2": ("SOUR2:FREQ:STAR", 2, "Hz"),
-                          "SweepStopFreq1": ("SOUR1:FREQ:STOP", 1, "Hz"),
-                          "SweepStopFreq2": ("SOUR2:FREQ:STOP", 2, "Hz"),
-                          "SweepTime1": ("SOUR1:SWE:TIME", 1, "s"),
-                          "SweepTime2": ("SOUR2:SWE:TIME", 2, "s"),
-                          "SweepReturnTime1": ("SOUR1:SWE:RTIM", 1, "s"),
-                          "SweepReturnTime2": ("SOUR2:SWE:RTIM", 2, "s")}
+                          #"SweepStartFreq1": ("SOUR1:FREQ:STAR", 1, "Hz"),
+                          #"SweepStartFreq2": ("SOUR2:FREQ:STAR", 2, "Hz"),
+                          #"SweepStopFreq1": ("SOUR1:FREQ:STOP", 1, "Hz"),
+                          #"SweepStopFreq2": ("SOUR2:FREQ:STOP", 2, "Hz"),
+                          #"SweepTime1": ("SOUR1:SWE:TIME", 1, "s"),
+                          #"SweepTime2": ("SOUR2:SWE:TIME", 2, "s"),
+                          #"SweepReturnTime1": ("SOUR1:SWE:RTIM", 1, "s"),
+                          #"SweepReturnTime2": ("SOUR2:SWE:RTIM", 2, "s")
+                          }
 
 
         _inputChannels = {"OutEnable1": "",
@@ -69,17 +71,18 @@ if DG4000Enabled:
                           "Freq1": "Hz",
                           "Freq2": "Hz",
                           "Amp1": "V",
-                          "Amp2": "V",
+                          "Amp2": "V"
                           #"SweepEnabled1": "",
                           #"SweepEnabled2": "",
-                          "SweepStartFreq1": "Hz",
-                          "SweepStartFreq2": "Hz",
-                          "SweepStopFreq1": "Hz",
-                          "SweepStopFreq2": "Hz",
-                          "SweepTime1": "s",
-                          "SweepTime2": "s",
-                          "SweepReturnTime1": "s",
-                          "SweepReturnTime2": "s"}
+                          #"SweepStartFreq1": "Hz",
+                          #"SweepStartFreq2": "Hz",
+                          #"SweepStopFreq1": "Hz",
+                          #"SweepStopFreq2": "Hz",
+                          #"SweepTime1": "s",
+                          #"SweepTime2": "s",
+                          #"SweepReturnTime1": "s",
+                          #"SweepReturnTime2": "s"
+                          }
         def __init__(self, name, config, globalDict, instrument="TCPIP0::192.168.168.21::inst0::INSTR"):
             ExternalParameterBase.__init__(self, name, config, globalDict)
             self.rm = visa.ResourceManager()
@@ -104,7 +107,8 @@ if DG4000Enabled:
             function, index, unit = self._outputLookup[channel]
             command = "{0}?".format(function)#, index)
             try:
-                return Q(float(self.instrument.query(command)), unit) #set voltage
+                val = Q(float(self.instrument.query(command)), unit)
+                return val #set voltage
             except:
                 return self.instrument.query(command)
         def close(self):
@@ -743,9 +747,10 @@ if HighFinesseWavemeterEnabled:
                 self.currentFrequency = self.wavemeter.set_frequency(value, self.settings.channel, self.settings.maxAge)
             logger.debug( "setFrequency {0}, current frequency {1}".format(self.settings.channelSettings[None].value, self.currentFrequency) )
             print("self.currentFrequency is", self.currentFrequency, ". self.settings.channelSettings[None].value is", self.settings.channelSettings[None].value, "self.settings.maxDeviation is", self.settings.maxDeviation)
-            arrived = self.currentFrequency is not None and abs(
-                self.currentFrequency - self.settings.channelSettings[None].value) < self.settings.maxDeviation
+            #arrived = self.currentFrequency is not None and abs(
+            #    self.currentFrequency - self.settings.channelSettings[None].value) < self.settings.maxDeviation
             #print(arrived)
+            arrived = True
             return value, arrived
 
         def currentExternalValue(self, channel):
