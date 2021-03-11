@@ -5,95 +5,98 @@ import os
 import sys
 import glob
 import time
-
 sys.path.append(r'C:\Users\ions\Documents\IonControl\project_dir\QuditLab\config\Scripts')
 from TrapFunctions import *
+from DataFunctions import *
+from NeutralFluorFunctions import *
+
+ResetLasers = False
 
 NeutralFluorescenceProgram = "Ablation_For-Script_NeutralFluorescence_Nat"
 PulseAblationDummyProgram = "PulseAblation_For-Script_Dummy_Ba138"
-FreqSetWaitTime = 3
+CountsProgram = "PMT_CheckCounts_Combined-Beam"
+CountsProgramBG = "PMT_CheckCounts_For-Script_Neutral_BG"
+FreqSetWaitTime = getGlobal("TimeSwitchLaserFreqWM")
 
-def NeutralFluoresencePulse(NeutProgram, setScan, startScan, stopScan, getAllData):
-    setScan(NeutProgram)
-    startScan(globalOverrides=list(), wait=True)
-    time.sleep(0.05)
-    data = getAllData()['PMT Count'] #Returns all data associated with scan.
-    ydata = data[1]
-    ydataAvg = np.mean(np.array(ydata))
-    ydataStD = np.std(np.array(ydata))
-    ydataVar = ydataStD/np.sqrt(len(ydata))
-    stopScan()   
-    return (ydata, ydataAvg, ydataStD, ydataVar)
+NumExp = 5
+PulseEnergy = 140
+IonizationPower = 8
+AblationPulsesPer = getGlobal("AblationPulsesPer")
+WindowStart = 160
+WindowWidth = 55
+CalibWindowStart = 145
+CalibWindowWidth = 55
+Scan553Start = getGlobal("NeutralFluorescence553ScanBeginning").magnitude*1e-6
+Scan553End = getGlobal("NeutralFluorescence553ScanEnd").magnitude*1e-6
+Scan553Res = getGlobal("NeutralFluorescence553ScanRes").magnitude*1e-6
 
-Filepath = r"Z:\Lab Data\Sessions\2020\2020_11\2020_11_17"
-filename = "Neut-Fluor_Freq_18uW_69uJ_5HzRep_155usWin_10Samp.txt"
-
-if not os.path.exists(os.path.abspath(Filepath)):
-    os.mkdir(os.path.abspath(Filepath))
-
+Freqs553 = np.arange(Scan553Start, Scan553End, Scan553Res)
 (Freq493, Freq650, Freq553) = SetGlobalLaserFreqs("Ba138", getGlobal, setGlobal)
+FreqCalibration = Freq553
+Freqs553 += Freq553
+print("Scan Start: %f THz, Scan End: %f THz, Scan Resolution: %f THz"%(Scan553Start + Freq553, Scan553End + Freq553, Scan553Res + Freq553))
 
-FreqCalibration = Freq553 + 100e-6
-Freq553Start = Freq553
-Freq553End = Freq553 + 600e-6
-Freq553Resolution = 10e-6
-Freqs553 = np.arange(Freq553Start, Freq553End, Freq553Resolution)
-ExperimentCount = 0
+if ResetLasers:
+    SendLasersToTrap(CountsProgram,setScan,startScan,stopScan,getAllData)
+    ResetAblation()
 
+BaseFolder = r"Z:\Lab Data\Sessions"
+addname = ""
+filename0 = f"Neut-Fluor-Spect_{PulseEnergy:0.0f}uJ_{IonizationPower:0.0f}uW{addname}_*.txt"
+filename0 = GetDataFilePath(BaseFolder, filename0)
 
-#os.system('ssh pi@192.168.168.122 cd Documents; python press_stop_button.py')
-#time.sleep(4)
-#os.system('ssh pi@192.168.168.122 cd Documents; python press_start_button.py')
+(ydataBGAvg, ydataBGStd) = GetPMTCounts(CountsProgramBG, setScan, startScan, stopScan, getAllData)
+print(ydataBGAvg)
 
+WriteString = f"Metadata,Ionization Freqs.:{Freq553:0.6f} {Scan553Start*1e6:0.0f} {Scan553End*1e6:0.0f} {Scan553Res*1e6:0.0f}:THz MHz,\
+Window Start:{WindowStart:0.3f}:us,Window Width:{WindowWidth:0.3f}:us,Calibration Window Start:{CalibWindowStart}:us,Calibration Window Width:{CalibWindowWidth}:us,\
+BG:{ydataBGAvg}:,BG_std:{ydataBGStd}:"
+WriteString += ""#Extra metadata from Ba137 trapping
+if AblationPulsesPer > 1:
+    NeutralWriteString = "\tNeutralCounts\tNeutralCounts_std"
+else:
+    NeutralWriteString = "\tNeutralCounts"
+WriteString += f"\nh,ExpNum\tIonizationFreq{NeutralWriteString}"
+SaveDataToTextFile(filename0, WriteString)
 
-#setScan(PulseAblationDummyProgram)
-#startScan(globalOverrides=list(), wait=False)
-#time.sleep(2)
-#stopScan()
-
-#save_file = glob.glob(os.path.abspath(Filepath + "\\" + filename))  
-for LaserFreq in Freqs553:
-    if scriptIsStopped():
-        break
-    if ExperimentCount == 0:
-        ExperimentCount += 1
-        if not "%s"%getGlobal("IonizationFreq") == "%s THz"%FreqCalibration:
-            setGlobal("IonizationFreq", FreqCalibration, "THz")
+Experiment = 0
+i = 0
+while Experiment < NumExp:
+    PulseNum = 0
+    for FreqNum, LaserFreq in enumerate(Freqs553):
+        if scriptIsStopped():
+            break
+        if FreqNum == 0 and Experiment == 0:
+            PulseNum += 1
+            setNeutralParameters(CalibWindowStart, CalibWindowWidth, FreqCalibration, getGlobal, setGlobal)
             time.sleep(FreqSetWaitTime)
-        (dataRaw, dataAvg, dataStD, dataVar) = NeutralFluoresencePulse(NeutralFluorescenceProgram, setScan, startScan, stopScan, getAllData)
-        print("Step number: %i, Laser frequency setpoint: %f, Average Data: %f, Var: %f"%(ExperimentCount, FreqCalibration, dataAvg, dataVar))
-        save_file = glob.glob(os.path.abspath(Filepath + "\\" + filename))
-        if not save_file:
-            savetextfile = open(os.path.abspath(Filepath + "\\" + filename),'w+')
-        else:
-            savetextfile = open(os.path.abspath(Filepath + "\\" + filename),'a+')
-        savetextfile.write(str(ExperimentCount) + "\t" + str(FreqCalibration) + "\t" + str(dataAvg) + "\t" + str(dataStD) + "\t" + str(dataVar) + "\t" + str(dataRaw) + "\n")
-        savetextfile.close()
-    
-    ExperimentCount += 1
-    if not "%s"%getGlobal("IonizationFreq") == "%s THz"%LaserFreq:
-        setGlobal("IonizationFreq", LaserFreq, "THz")
-        time.sleep(FreqSetWaitTime)
-    (dataRaw, dataAvg, dataStD, dataVar) = NeutralFluoresencePulse(NeutralFluorescenceProgram, setScan, startScan, stopScan, getAllData)
-    print("Step number: %i, Laser frequency setpoint: %f, Average Data: %f, Var: %f"%(ExperimentCount, LaserFreq, dataAvg, dataVar))
-    save_file = glob.glob(os.path.abspath(Filepath + "\\" + filename))
-    if not save_file:
-        savetextfile = open(os.path.abspath(Filepath + "\\" + filename),'w+')
-    else:
-        savetextfile = open(os.path.abspath(Filepath + "\\" + filename),'a+')
-    savetextfile.write(str(ExperimentCount) + "\t" + str(LaserFreq) + "\t" + str(dataAvg) + "\t" + str(dataStD) + "\t" + str(dataVar) + "\t" + str(dataRaw) + "\n")
-    savetextfile.close()
+            (dataRaw, dataAvg, dataStd) = NeutralFluoresencePulse(NeutralFluorescenceProgram, setScan, startScan, stopScan, getAllData)
+            if not dataStd:
+                NeutralWrite = f"\t{dataAvg}"
+            else:
+                NeutralWrite = f"\t{dataAvg}\t{dataStd}"
+            WriteString = f"{PulseNum}\t{FreqCalibration:0.6f}{NeutralWrite}"
+            SaveDataToTextFile(filename0, WriteString)
 
-    ExperimentCount += 1
-    if not "%s"%getGlobal("IonizationFreq") == "%s THz"%FreqCalibration:
-        setGlobal("IonizationFreq", FreqCalibration, "THz")
+        PulseNum += 1
+        setNeutralParameters(WindowStart, WindowWidth, LaserFreq, getGlobal, setGlobal)
         time.sleep(FreqSetWaitTime)
-    (dataRaw, dataAvg, dataStD, dataVar) = NeutralFluoresencePulse(NeutralFluorescenceProgram, setScan, startScan, stopScan, getAllData)
-    print("Step number: %i, Laser frequency setpoint: %f, Average Data: %f, Var: %f"%(ExperimentCount, FreqCalibration, dataAvg, dataVar))
-    save_file = glob.glob(os.path.abspath(Filepath + "\\" + filename))
-    if not save_file:
-        savetextfile = open(os.path.abspath(Filepath + "\\" + filename),'w+')
-    else:
-        savetextfile = open(os.path.abspath(Filepath + "\\" + filename),'a+')
-    savetextfile.write(str(ExperimentCount) + "\t" + str(FreqCalibration) + "\t" + str(dataAvg) + "\t" + str(dataStD) + "\t" + str(dataVar) + "\t" + str(dataRaw) + "\n")
-    savetextfile.close()
+        (dataRaw, dataAvg, dataStd) = NeutralFluoresencePulse(NeutralFluorescenceProgram, setScan, startScan, stopScan, getAllData)
+        if not dataStd:
+            NeutralWrite = f"\t{dataAvg}"
+        else:
+            NeutralWrite = f"\t{dataAvg}\t{dataStd}"
+        WriteString = f"{PulseNum}\t{LaserFreq:0.6f}{NeutralWrite}"
+        SaveDataToTextFile(filename0, WriteString)
+
+        PulseNum += 1
+        setNeutralParameters(CalibWindowStart, CalibWindowWidth, FreqCalibration, getGlobal, setGlobal)
+        time.sleep(FreqSetWaitTime)
+        (dataRaw, dataAvg, dataStd) = NeutralFluoresencePulse(NeutralFluorescenceProgram, setScan, startScan, stopScan, getAllData)
+        if not dataStd:
+            NeutralWrite = f"\t{dataAvg}"
+        else:
+            NeutralWrite = f"\t{dataAvg}\t{dataStd}"
+        WriteString = f"{PulseNum}\t{FreqCalibration:0.6f}{NeutralWrite}"
+        SaveDataToTextFile(filename0, WriteString)
+    Experiment += 1

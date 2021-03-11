@@ -17,8 +17,8 @@ CoolSweepsNum = 2
 
 (Freq493, Freq650, Freq553) = SetGlobalLaserFreqs("Ba138", getGlobal, setGlobal)
 
-Filepath = r"Z:\Lab Data\Sessions\2020\2020_11\2020_11_16"
-filename = "PMTCount169us_nat_test.txt"
+Filepath = r"Z:\Lab Data\Sessions\2020\2020_11\2020_11_20"
+filename = "PMTCount169us_1mJ_rad_7o18734x_5o9006y.txt"
 
 if not os.path.exists(os.path.abspath(Filepath)):
     os.mkdir(os.path.abspath(Filepath))

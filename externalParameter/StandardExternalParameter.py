@@ -108,9 +108,25 @@ if DG4000Enabled:
             command = "{0}?".format(function)#, index)
             try:
                 val = Q(float(self.instrument.query(command)), unit)
+                val = str(val)
+                val = val[:-2]
+                #print("Q unit %s"%val)
+                if val == "ON":
+                    #print("Q unit IN %s"%val)
+                    val = 1
+                else:
+                    val = 0
                 return val #set voltage
             except:
-                return self.instrument.query(command)
+                val = str(self.instrument.query(command))
+                val = val[:-2]
+                #print("Other unit %s"%val)
+                if val == "ON":
+                    #print("Other unit IN %s"%val)
+                    val = 1
+                else:
+                    val = 0
+                return val
         def close(self):
             del self.instrument
 
